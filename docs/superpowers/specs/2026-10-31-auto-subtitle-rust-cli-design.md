@@ -15,6 +15,7 @@ The tool operates on a **Hybrid Model**:
 - **Default (Local & Offline):** Runs speech recognition locally via `whisper-rs` (with NVIDIA CUDA GPU acceleration) and translates subtitles locally via `Ollama` (using models like `qwen2.5:7b`).
 - **Cloud Fallback / API Mode:** Supports OpenAI-compatible REST endpoints for STT (Whisper API / Groq) and LLM translation (DeepSeek, OpenAI, etc.).
 - **Zero-Config UX:** Automatically downloads missing static FFmpeg binaries and GGML Whisper model weights on demand to user cache directories.
+- **Pre-existing Subtitle Support:** Accepts existing subtitle files (`.srt`, `.vtt`, `.ass`) via `--subtitle`, skipping STT extraction entirely to directly translate and/or burn into video.
 
 ---
 
@@ -27,14 +28,18 @@ The project follows a **Trait-based Modular Architecture**, allowing components 
                     │      Input Video        │
                     └────────────┬────────────┘
                                  │
-                                 ▼
-                     [Audio Extractor (FFmpeg)]
-                                 │
-                                 ▼ (16kHz 16-bit mono WAV)
-                     [Transcriber (whisper-rs)]
-                                 │
+           ┌─────────────────────┴─────────────────────┐
+           │                                           │
+  (No external sub)                            (With --subtitle file)
+           ▼                                           ▼
+[Audio Extractor (FFmpeg)]                    [Subtitle Parser (.srt/.vtt)]
+           │                                           │
+           ▼ (16kHz mono WAV)                          │
+[Transcriber (whisper-rs)]                             │
+           │                                           │
+           └─────────────────────┬─────────────────────┘
                                  ▼ (Vec<SubtitleSegment>)
-                     [Translator (Ollama / API)]
+                     [Translator (Ollama / API)]  <── (Skipped if --skip-translate)
                                  │
                                  ▼ (Translated SubtitleSegments)
                      [Subtitle Engine (.srt / .ass)]
@@ -75,6 +80,7 @@ auto-subtitle/
 │   ├── subtitle/
 │   │   ├── mod.rs
 │   │   ├── model.rs         # SubtitleSegment & SubtitleTrack data structs
+│   │   ├── parser.rs        # Parse existing .srt / .vtt / .ass files into SubtitleSegment
 │   │   ├── srt.rs           # SRT formatting & generation
 │   │   └── ass.rs           # ASS formatting (styling, colors, bilingual layout)
 │   │
@@ -82,6 +88,7 @@ auto-subtitle/
 │       ├── mod.rs
 │       └── burner.rs        # Hardsub (burn-in) and Softsub (mux track) via FFmpeg
 └── tests/
+    ├── parser_test.rs
     ├── srt_test.rs
     ├── ass_test.rs
     └── translator_test.rs
@@ -142,6 +149,8 @@ Built with `clap` derive mode:
 | :--- | :--- | :--- | :--- |
 | `--input <PATH>` | `-i` | *(Required)* | Input video file path. |
 | `--output <PATH>` | `-o` | `<stem>_subtitled.mp4` | Output video file path or directory. |
+| `--subtitle <PATH>` | `--sub` | None | Optional path to existing subtitle file (`.srt`, `.vtt`, `.ass`). If provided, bypasses audio extraction & STT. |
+| `--skip-translate` | | `false` | Skip translation step (useful when input subtitle is already translated and only needs burning/muxing). |
 | `--source-lang <LANG>` | `-s` | `auto` | Source language code (`auto` for Whisper auto-detection). |
 | `--target-lang <LANG>` | `-t` | `vi` | Target translation language (e.g. `vi`, `en`, `ja`). |
 | `--mode <MODE>` | `-m` | `hardsub` | Output mode: `hardsub` (burn-in), `softsub` (mux track), `subs-only` (export .srt/.ass only). |
@@ -188,6 +197,7 @@ Built with `clap` derive mode:
 ## 7. Testing Strategy
 
 1. **Unit Testing:**
+   - `test_subtitle_parser`: Verifies parsing of `.srt`, `.vtt`, and `.ass` files into structured `SubtitleSegment` objects, checking accurate millisecond conversion and multiline handling.
    - `test_srt_formatting`: Verifies timestamps conform to `00:00:00,000 --> 00:00:00,000` and line breaks match SRT specification.
    - `test_ass_bilingual_styling`: Verifies ASS header, styles (FontName, PrimaryColour, SecondaryColour), and layered layout for bilingual subtitles.
    - `test_translation_batch_parsing`: Verifies JSON/indexed line responses from LLM accurately map 1:1 back to segments.
