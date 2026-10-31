@@ -3,6 +3,10 @@ name = "auto-subtitle"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+cuda = ["whisper-rs/cuda"]
+
 [dependencies]
 clap = { version = "4.5", features = ["derive", "env"] }
 tokio = { version = "1", features = ["full"] }
@@ -17,6 +21,8 @@ dirs = "5"
 regex = "1"
 tempfile = "3.20"
 which = "6"
+whisper-rs = "0.14"
+hound = "3.5"
 
 [dev-dependencies]
 wiremock = "0.6"
