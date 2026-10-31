@@ -54,7 +54,7 @@ pub fn sanitize_segments(mut segs: Vec<SubtitleSegment>) -> Vec<SubtitleSegment>
     segs.sort_by_key(|s| (s.start_ms, s.end_ms));
     for i in 1..segs.len() {
         let next_start = segs[i].start_ms;
-        if segs[i - 1].end_ms > next_start {
+        if next_start > segs[i - 1].start_ms && segs[i - 1].end_ms > next_start {
             segs[i - 1].end_ms = next_start;
         }
     }

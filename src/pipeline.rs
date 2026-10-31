@@ -50,12 +50,16 @@ pub fn resolve_output_paths(cli: &Cli) -> anyhow::Result<OutputPaths> {
     let input_dir = cli.input.parent().unwrap_or_else(|| Path::new(""));
 
     let (output_dir, out_stem) = if let Some(ref out) = cli.output {
-        let parent = out.parent().unwrap_or_else(|| Path::new(""));
-        let stem = out
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .context("output path has no valid file stem")?;
-        (parent, stem.to_string())
+        if out.is_dir() {
+            (out.as_path(), format!("{input_stem}_subtitled"))
+        } else {
+            let parent = out.parent().unwrap_or_else(|| Path::new(""));
+            let stem = out
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .context("output path has no valid file stem")?;
+            (parent, stem.to_string())
+        }
     } else {
         (input_dir, format!("{input_stem}_subtitled"))
     };
@@ -67,14 +71,27 @@ pub fn resolve_output_paths(cli: &Cli) -> anyhow::Result<OutputPaths> {
         OutputMode::SubsOnly => None,
         OutputMode::Hardsub => {
             if let Some(ref out) = cli.output {
-                Some(out.clone())
+                if out.is_dir() {
+                    Some(out.join(format!("{out_stem}.mp4")))
+                } else {
+                    Some(out.clone())
+                }
             } else {
                 Some(output_dir.join(format!("{out_stem}.mp4")))
             }
         }
         OutputMode::Softsub => {
             if let Some(ref out) = cli.output {
-                Some(out.clone())
+                if out.is_dir() {
+                    let ext = cli
+                        .input
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("mp4");
+                    Some(out.join(format!("{out_stem}.{ext}")))
+                } else {
+                    Some(out.clone())
+                }
             } else {
                 let ext = cli
                     .input

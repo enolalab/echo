@@ -178,9 +178,11 @@ impl DependencyManager {
 
 pub async fn download_to(client: &reqwest::Client, url: &str, dest: &Path) -> Result<()> {
     if let Some(parent) = dest.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .with_context(|| format!("failed to create parent directory {}", parent.display()))?;
+        if !parent.as_os_str().is_empty() {
+            tokio::fs::create_dir_all(parent).await.with_context(|| {
+                format!("failed to create parent directory {}", parent.display())
+            })?;
+        }
     }
 
     let file_name = dest
