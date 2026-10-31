@@ -161,7 +161,9 @@ Built with `clap` derive mode:
 | `--ollama-model <M>` | | `qwen2.5:7b` | Model name deployed in Ollama. |
 | `--ollama-url <URL>` | | `http://localhost:11434` | Ollama service base URL. |
 | `--api-key <KEY>` | | None | API Key for cloud STT / Translation (can also read from env `OPENAI_API_KEY`). |
-| `--api-base-url <URL>` | | None | Custom base URL for OpenAI-compatible translation endpoint. |
+| `--api-base-url <URL>` | | `https://api.openai.com/v1` | Base URL for OpenAI-compatible STT / translation endpoints. |
+| `--api-model <M>` | | `gpt-4o-mini` | Chat model used by `openai-compat` translation. |
+| `--stt-api-model <M>` | | `whisper-1` | Model used by `--stt-engine api`. |
 | `--keep-temp` | | `false` | Keep intermediate `.wav` and `.srt/.ass` files on completion. |
 
 ---
