@@ -22,8 +22,12 @@ impl AppConfig {
         let models_dir = base.join("models");
         let bin_dir = base.join("bin");
 
-        fs::create_dir_all(&models_dir)
-            .with_context(|| format!("failed to create models directory at {}", models_dir.display()))?;
+        fs::create_dir_all(&models_dir).with_context(|| {
+            format!(
+                "failed to create models directory at {}",
+                models_dir.display()
+            )
+        })?;
         fs::create_dir_all(&bin_dir)
             .with_context(|| format!("failed to create bin directory at {}", bin_dir.display()))?;
 

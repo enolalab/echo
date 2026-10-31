@@ -69,7 +69,10 @@ pub fn parse_translated_lines(response: &str, count: usize) -> anyhow::Result<Ve
     for (i, opt) in results.into_iter().enumerate() {
         match opt {
             Some(s) => out.push(s),
-            None => anyhow::bail!("Missing translated line [{}] in translation response", i + 1),
+            None => anyhow::bail!(
+                "Missing translated line [{}] in translation response",
+                i + 1
+            ),
         }
     }
 

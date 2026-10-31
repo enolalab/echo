@@ -30,18 +30,16 @@ fn prompt_handles_auto_source_lang() {
 
 #[test]
 fn parse_ok_and_missing_line_errors() {
-    let ok = parse_translated_lines(
-        "Here:\n[1] Chào buổi sáng.\n[2] Bạn / khỏe không?\n",
-        2,
-    )
-    .unwrap();
+    let ok =
+        parse_translated_lines("Here:\n[1] Chào buổi sáng.\n[2] Bạn / khỏe không?\n", 2).unwrap();
     assert_eq!(ok, vec!["Chào buổi sáng.", "Bạn\nkhỏe không?"]);
     assert!(parse_translated_lines("[1] only one", 2).is_err());
 }
 
 #[test]
 fn parse_ignores_extras_and_out_of_range() {
-    let raw = "Intro commentary\n[0] Zero\n[1] First\n[2] Second\n[3] Third extra\n[99] Ninety-nine";
+    let raw =
+        "Intro commentary\n[0] Zero\n[1] First\n[2] Second\n[3] Third extra\n[99] Ninety-nine";
     let ok = parse_translated_lines(raw, 2).unwrap();
     assert_eq!(ok, vec!["First", "Second"]);
 }
@@ -59,8 +57,7 @@ async fn ollama_translate_and_health() {
     Mock::given(method("POST"))
         .and(path("/api/chat"))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(json!({"message":{"content":"[1] A\n[2] B"}})),
+            ResponseTemplate::new(200).set_body_json(json!({"message":{"content":"[1] A\n[2] B"}})),
         )
         .mount(&s)
         .await;
@@ -82,8 +79,7 @@ async fn ollama_health_matches_name_without_tag_to_latest() {
     Mock::given(method("GET"))
         .and(path("/api/tags"))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(json!({"models":[{"name":"qwen2.5:latest"}]})),
+            ResponseTemplate::new(200).set_body_json(json!({"models":[{"name":"qwen2.5:latest"}]})),
         )
         .mount(&s)
         .await;
@@ -107,7 +103,7 @@ async fn openai_compat_sends_bearer_and_surfaces_http_errors() {
         .and(header("authorization", "Bearer k"))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_body_json(json!({"choices":[{"message":{"content":"[1] A\n[2] B"}}]}))
+                .set_body_json(json!({"choices":[{"message":{"content":"[1] A\n[2] B"}}]})),
         )
         .mount(&s)
         .await;

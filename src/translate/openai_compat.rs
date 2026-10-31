@@ -86,10 +86,9 @@ impl Translator for OpenAiCompatTranslator {
             .await
             .context("Không thể giải mã phản hồi JSON từ /chat/completions")?;
 
-        let choice = chat_resp
-            .choices
-            .first()
-            .ok_or_else(|| anyhow::anyhow!("Phản hồi từ OpenAI-compatible không chứa lựa chọn nào (choices rỗng)"))?;
+        let choice = chat_resp.choices.first().ok_or_else(|| {
+            anyhow::anyhow!("Phản hồi từ OpenAI-compatible không chứa lựa chọn nào (choices rỗng)")
+        })?;
 
         let raw_content = choice.message.content.as_deref().unwrap_or_default();
         let translated = parse_translated_lines(raw_content, segments.len())

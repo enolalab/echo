@@ -26,6 +26,7 @@ pub fn read_wav_16k_mono(path: &Path) -> Result<Vec<f32>> {
         .map(|s| s.map(|val| val as f32 / 32768.0))
         .collect();
 
-    let samples = samples.with_context(|| format!("failed to read audio samples from {}", path.display()))?;
+    let samples =
+        samples.with_context(|| format!("failed to read audio samples from {}", path.display()))?;
     Ok(samples)
 }

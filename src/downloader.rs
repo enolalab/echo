@@ -23,8 +23,7 @@ pub const WHISPER_MODELS: &[&str] = &[
     "large-v3-turbo",
 ];
 
-const DEFAULT_MODEL_BASE_URL: &str =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+const DEFAULT_MODEL_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 const DEFAULT_FFMPEG_URL: &str =
     "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz";
 
@@ -97,8 +96,12 @@ impl DependencyManager {
             );
         }
 
-        fs::create_dir_all(&self.config.bin_dir)
-            .with_context(|| format!("failed to create directory {}", self.config.bin_dir.display()))?;
+        fs::create_dir_all(&self.config.bin_dir).with_context(|| {
+            format!(
+                "failed to create directory {}",
+                self.config.bin_dir.display()
+            )
+        })?;
 
         let temp_dir = tempfile::tempdir()
             .context("failed to create temporary directory for ffmpeg extraction")?;
@@ -124,9 +127,9 @@ impl DependencyManager {
         if direct.is_file() {
             found_ffmpeg = Some(direct);
         } else {
-            for entry in fs::read_dir(temp_dir.path())
-                .with_context(|| format!("failed to read directory {}", temp_dir.path().display()))?
-            {
+            for entry in fs::read_dir(temp_dir.path()).with_context(|| {
+                format!("failed to read directory {}", temp_dir.path().display())
+            })? {
                 let entry = entry.context("failed to read directory entry")?;
                 let path = entry.path();
                 if path.is_dir() {
@@ -139,12 +142,13 @@ impl DependencyManager {
             }
         }
 
-        let extracted_binary = found_ffmpeg
-            .context("could not find ffmpeg binary in extracted archive")?;
+        let extracted_binary =
+            found_ffmpeg.context("could not find ffmpeg binary in extracted archive")?;
 
         if fs::rename(&extracted_binary, &bin_ffmpeg).is_err() {
-            fs::copy(&extracted_binary, &bin_ffmpeg)
-                .with_context(|| format!("failed to copy ffmpeg binary to {}", bin_ffmpeg.display()))?;
+            fs::copy(&extracted_binary, &bin_ffmpeg).with_context(|| {
+                format!("failed to copy ffmpeg binary to {}", bin_ffmpeg.display())
+            })?;
             let _ = fs::remove_file(&extracted_binary);
         }
 
@@ -224,8 +228,8 @@ pub async fn download_to(client: &reqwest::Client, url: &str, dest: &Path) -> Re
 
         let mut stream = resp.bytes_stream();
         while let Some(chunk_res) = stream.next().await {
-            let chunk = chunk_res
-                .with_context(|| format!("failed to read byte stream from {url}"))?;
+            let chunk =
+                chunk_res.with_context(|| format!("failed to read byte stream from {url}"))?;
             file.write_all(&chunk)
                 .await
                 .with_context(|| format!("failed to write data to {}", part_path.display()))?;

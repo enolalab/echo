@@ -1,5 +1,5 @@
-use std::path::Path;
 use crate::subtitle::model::SubtitleSegment;
+use std::path::Path;
 
 pub mod audio;
 pub mod whisper_api;

@@ -2,7 +2,9 @@ use auto_subtitle::media::*;
 use std::path::Path;
 
 fn args(c: &std::process::Command) -> Vec<String> {
-    c.get_args().map(|a| a.to_string_lossy().into_owned()).collect()
+    c.get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect()
 }
 
 #[test]
@@ -62,21 +64,25 @@ fn hardsub_rejects_unsafe_ass_name() {
 
 #[test]
 fn softsub_codec_by_container() {
-    let mp4 = args(&build_softsub_command(
-        Path::new("ffmpeg"),
-        Path::new("a.mp4"),
-        Path::new("s.srt"),
-        Path::new("o.mp4"),
-    )
-    .unwrap());
+    let mp4 = args(
+        &build_softsub_command(
+            Path::new("ffmpeg"),
+            Path::new("a.mp4"),
+            Path::new("s.srt"),
+            Path::new("o.mp4"),
+        )
+        .unwrap(),
+    );
     assert!(mp4.windows(2).any(|w| w == ["-c:s", "mov_text"]));
-    let mkv = args(&build_softsub_command(
-        Path::new("ffmpeg"),
-        Path::new("a.mkv"),
-        Path::new("s.srt"),
-        Path::new("o.mkv"),
-    )
-    .unwrap());
+    let mkv = args(
+        &build_softsub_command(
+            Path::new("ffmpeg"),
+            Path::new("a.mkv"),
+            Path::new("s.srt"),
+            Path::new("o.mkv"),
+        )
+        .unwrap(),
+    );
     assert!(mkv.windows(2).any(|w| w == ["-c:s", "srt"]));
     assert!(build_softsub_command(
         Path::new("ffmpeg"),

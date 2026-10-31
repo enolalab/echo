@@ -18,12 +18,7 @@ pub struct ApiTranscriber {
 }
 
 impl ApiTranscriber {
-    pub fn new(
-        api_key: String,
-        base_url: String,
-        model: String,
-        language: Option<String>,
-    ) -> Self {
+    pub fn new(api_key: String, base_url: String, model: String, language: Option<String>) -> Self {
         Self {
             api_key,
             base_url,
@@ -103,7 +98,10 @@ impl Transcriber for ApiTranscriber {
             form = form.text("language", lang.clone());
         }
 
-        let url = format!("{}/audio/transcriptions", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/audio/transcriptions",
+            self.base_url.trim_end_matches('/')
+        );
         let resp = self
             .client
             .post(&url)

@@ -40,11 +40,7 @@ pub fn segments_from_whisper(raw: Vec<(i64, i64, String)>) -> Vec<SubtitleSegmen
 impl Transcriber for LocalWhisperTranscriber {
     async fn transcribe(&self, audio_path: &Path) -> Result<Vec<SubtitleSegment>> {
         let samples = read_wav_16k_mono(audio_path)?;
-        let (model, lang, gpu) = (
-            self.model_path.clone(),
-            self.language.clone(),
-            self.use_gpu,
-        );
+        let (model, lang, gpu) = (self.model_path.clone(), self.language.clone(), self.use_gpu);
         tokio::task::spawn_blocking(move || {
             match run_whisper(&model, lang.as_deref(), &samples, gpu) {
                 Ok(raw) => Ok(raw),
@@ -89,13 +85,9 @@ fn run_whisper(
     let n = state.full_n_segments().context("get segment count")?;
     (0..n)
         .map(|i| {
-            let t0 = state
-                .full_get_segment_t0(i)
-                .context("get segment start")?;
+            let t0 = state.full_get_segment_t0(i).context("get segment start")?;
             let t1 = state.full_get_segment_t1(i).context("get segment end")?;
-            let text = state
-                .full_get_segment_text(i)
-                .context("get segment text")?;
+            let text = state.full_get_segment_text(i).context("get segment text")?;
             Ok((t0, t1, text))
         })
         .collect()
