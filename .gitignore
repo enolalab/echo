@@ -1,2 +1,9 @@
 /target
 /.superpowers
+
+# Test media artifacts
+*.mp4
+*.flac
+*.wav
+*.mp3
+jfk*
