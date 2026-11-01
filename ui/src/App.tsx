@@ -12,12 +12,14 @@ import {
   exportSubtitles,
   openInFileManager,
   pickVideoFile,
+  listenPipelineProgress,
   isTauri,
 } from './lib/ipc';
 import type {
   SubtitleSegment,
   StylePreset,
   PipelineStageEvent,
+  PipelineProgressEvent,
 } from './types';
 
 export default function App() {
@@ -39,6 +41,7 @@ export default function App() {
   // Pipeline execution state
   const [isRunning, setIsRunning] = useState(false);
   const [currentStage, setCurrentStage] = useState<PipelineStageEvent | null>(null);
+  const [progress, setProgress] = useState<PipelineProgressEvent | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [isExportOpen, setIsExportOpen] = useState(false);
 
@@ -51,26 +54,35 @@ export default function App() {
     }
   }, [systemInfo, ollamaModel]);
 
-  // Setup Tauri event listeners
+  // Setup pipeline progress listener
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listenPipelineProgress((event) => {
+      setProgress(event);
+      setCurrentStage({ stage: event.stage, message: event.message });
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
+
+  // Setup Tauri event listeners for logs
   useEffect(() => {
     if (!isTauri()) {
       return;
     }
 
-    let unlistenStage: (() => void) | undefined;
     let unlistenLog: (() => void) | undefined;
 
     const setupListeners = async () => {
       try {
-        unlistenStage = await listen<PipelineStageEvent>('pipeline-stage', (event) => {
-          setCurrentStage(event.payload);
-        });
-
         unlistenLog = await listen<string>('pipeline-log', (event) => {
           setLogs((prev) => [...prev, event.payload]);
         });
       } catch (err) {
-        // Fallback for non-tauri or browser test environment
         console.warn('Tauri event listeners not registered:', err);
       }
     };
@@ -78,7 +90,6 @@ export default function App() {
     setupListeners();
 
     return () => {
-      if (unlistenStage) unlistenStage();
       if (unlistenLog) unlistenLog();
     };
   }, []);
@@ -117,6 +128,12 @@ export default function App() {
     setIsRunning(true);
     setLogs([]);
     setCurrentStage({ stage: 'extract_audio', message: 'Bắt đầu quy trình tạo phụ đề...' });
+    setProgress({
+      stage: 'extract_audio',
+      message: 'Bắt đầu quy trình tạo phụ đề...',
+      percentage: 0,
+      elapsed_secs: 0,
+    });
 
     try {
       const result = await startPipeline({
@@ -299,6 +316,7 @@ export default function App() {
       {/* 3. Bottom Progress Drawer */}
       <ProgressDrawer
         currentStage={currentStage}
+        progress={progress}
         logs={logs}
         isRunning={isRunning}
         onOpenExport={() => setIsExportOpen(true)}

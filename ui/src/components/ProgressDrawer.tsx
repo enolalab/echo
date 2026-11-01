@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Terminal, ChevronUp, ChevronDown, CheckCircle2, Loader2 } from 'lucide-react';
-import type { PipelineStageEvent } from '../types';
+import type { PipelineStageEvent, PipelineProgressEvent } from '../types';
 
 interface ProgressDrawerProps {
   currentStage: PipelineStageEvent | null;
+  progress: PipelineProgressEvent | null;
   logs: string[];
   isRunning: boolean;
   onOpenExport: () => void;
@@ -17,8 +18,15 @@ const STAGES = [
   { key: 'ready', label: 'Sẵn Sàng' },
 ] as const;
 
+function formatElapsed(secs: number): string {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
 export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
   currentStage,
+  progress,
   logs,
   isRunning,
   onOpenExport,
@@ -26,19 +34,36 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
 }) => {
   const [showLogs, setShowLogs] = useState(false);
 
+  const activeStageKey = progress?.stage || currentStage?.stage;
   const getStageIndex = (stageKey?: string) => {
     if (!stageKey) return -1;
     return STAGES.findIndex((s) => s.key === stageKey);
   };
 
-  const currentIndex = getStageIndex(currentStage?.stage);
+  const currentIndex = getStageIndex(activeStageKey);
+  const percentage = progress?.percentage ?? (currentIndex === 3 ? 100 : isRunning ? 5 : 0);
 
   return (
     <div className="bg-slate-900 border-t border-slate-800 text-xs z-10 transition-all select-none">
+      {/* 3px Top Gradient Progress Bar */}
+      <div className="w-full bg-slate-800/60 h-[3px] overflow-hidden relative">
+        <div
+          data-testid="progress-line"
+          className={`h-full transition-all duration-300 ease-out ${
+            percentage >= 100
+              ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]'
+              : isRunning
+              ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 shadow-[0_0_8px_rgba(59,130,246,0.5)]'
+              : 'bg-slate-700'
+          }`}
+          style={{ width: `${Math.min(100, Math.max(0, percentage))}%` }}
+        />
+      </div>
+
       {/* Status Bar */}
       <div className="h-12 px-4 flex items-center justify-between gap-4">
         {/* Stages breadcrumb */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {STAGES.map((s, idx) => {
             const isDone = currentIndex > idx || (currentIndex === 3 && idx === 3);
             const isCurrent = currentIndex === idx && isRunning;
@@ -70,13 +95,33 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
           })}
         </div>
 
-        {/* Current status text */}
-        <div className="flex-1 text-center truncate text-slate-400 font-mono text-[11px]">
-          {currentStage?.message || (isRunning ? 'Đang khởi chạy...' : 'Sẵn sàng')}
+        {/* Current status & Progress badge */}
+        <div className="flex-1 flex items-center justify-center gap-2 truncate px-2 font-mono text-[11px]">
+          {isRunning && (
+            <span
+              data-testid="progress-percentage-badge"
+              className="bg-blue-950/80 text-blue-400 font-bold px-1.5 py-0.5 rounded border border-blue-800/50 shrink-0"
+            >
+              {Math.round(percentage)}%
+            </span>
+          )}
+
+          <span className="truncate text-slate-300">
+            {progress?.message || currentStage?.message || (isRunning ? 'Đang khởi chạy...' : 'Sẵn sàng')}
+          </span>
+
+          {isRunning && progress && progress.elapsed_secs > 0 && (
+            <span
+              data-testid="progress-timer"
+              className="text-slate-400 bg-slate-800/70 px-1.5 py-0.5 rounded border border-slate-700/60 text-[10px] shrink-0"
+            >
+              ⏱ {formatElapsed(progress.elapsed_secs)}
+            </span>
+          )}
         </div>
 
         {/* Action Buttons: Log Toggle & Export */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => setShowLogs(!showLogs)}
             className="flex items-center gap-1 text-slate-400 hover:text-slate-200 bg-slate-800 px-2.5 py-1 rounded border border-slate-700 transition"
