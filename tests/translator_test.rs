@@ -58,16 +58,38 @@ impl ChatClient for Recorder {
 }
 
 #[tokio::test]
-async fn llm_translator_forwards_prompt_and_system() {
+async fn llm_translator_renders_skill_per_batch() {
+    use auto_subtitle::skills::{GlossaryEntry, Skill};
     let seen = Arc::new(Mutex::new(vec![]));
+    let skill = Skill {
+        id: "u1".into(),
+        name: "Toán".into(),
+        description: String::new(),
+        system_prompt: "Bạn là chuyên gia Toán ({target_lang})".into(),
+        glossary: vec![
+            GlossaryEntry { source: "morning".into(), target: "buổi sáng".into() },
+            GlossaryEntry { source: "absent".into(), target: "x".into() },
+        ],
+    };
     let t = LlmTranslator::new(
         Box::new(Recorder { seen: seen.clone(), reply: Ok("[1] A\n[2] B / C".into()) }),
-        Some("Bạn là chuyên gia Toán".into()),
+        Some(skill),
     );
     assert_eq!(t.translate_batch(&batch(), "en", "vi").await.unwrap(), vec!["A", "B\nC"]);
     let calls = seen.lock().unwrap();
-    assert_eq!(calls[0].0.as_deref(), Some("Bạn là chuyên gia Toán"));
+    let system = calls[0].0.as_deref().unwrap();
+    assert!(system.starts_with("Bạn là chuyên gia Toán (vi)"));
+    assert!(system.contains("- morning → buổi sáng"));
+    assert!(!system.contains("absent"));
     assert!(calls[0].1.contains("[2] How are / you?"));
+}
+
+#[tokio::test]
+async fn llm_translator_without_skill_sends_no_system() {
+    let seen = Arc::new(Mutex::new(vec![]));
+    let t = LlmTranslator::new(Box::new(Recorder { seen: seen.clone(), reply: Ok("[1] A\n[2] B".into()) }), None);
+    t.translate_batch(&batch(), "en", "vi").await.unwrap();
+    assert_eq!(seen.lock().unwrap()[0].0, None);
 }
 
 #[tokio::test]
