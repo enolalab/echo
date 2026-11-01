@@ -82,13 +82,14 @@ fn run_whisper(
     p.set_print_special(false);
     p.set_print_timestamps(false);
     state.full(p, samples).context("whisper inference")?;
-    let n = state.full_n_segments().context("get segment count")?;
+    let n = state.full_n_segments();
     (0..n)
         .map(|i| {
-            let t0 = state.full_get_segment_t0(i).context("get segment start")?;
-            let t1 = state.full_get_segment_t1(i).context("get segment end")?;
-            let text = state.full_get_segment_text_lossy(i).context("get segment text")?;
-            Ok((t0, t1, text))
+            let seg = state.get_segment(i).context("get segment")?;
+            let t0 = seg.start_timestamp();
+            let t1 = seg.end_timestamp();
+            let text = seg.to_str_lossy().context("get segment text")?;
+            Ok((t0, t1, text.into_owned()))
         })
         .collect()
 }

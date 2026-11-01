@@ -35,7 +35,7 @@ dirs = "5"
 regex = "1"
 tempfile = "3.20"
 which = "6"
-whisper-rs = "0.14"
+whisper-rs = "0.16"
 hound = "3.5"
 
 [dev-dependencies]
