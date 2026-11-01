@@ -59,6 +59,16 @@ pub struct ExportRequest {
     pub segments: Vec<SubtitleSegment>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PipelineProgressEvent {
+    pub stage: String,
+    pub message: String,
+    pub percentage: f64,
+    pub current_step: Option<usize>,
+    pub total_steps: Option<usize>,
+    pub elapsed_secs: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,5 +103,20 @@ mod tests {
         };
         let serialized = serde_json::to_string(&info).unwrap();
         assert!(serialized.contains("qwen2.5:7b"));
+    }
+
+    #[test]
+    fn test_pipeline_progress_event_serialization() {
+        let event = PipelineProgressEvent {
+            stage: "translate".to_string(),
+            message: "Đang dịch 15/45 đoạn...".to_string(),
+            percentage: 72.5,
+            current_step: Some(15),
+            total_steps: Some(45),
+            elapsed_secs: 28,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: PipelineProgressEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, event);
     }
 }
