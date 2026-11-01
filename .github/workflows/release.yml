@@ -27,7 +27,7 @@ jobs:
             TAG="${{ github.event.inputs.tag }}"
           else
             VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
-            TAG="v${VERSION}-build.${GITHUB_RUN_NUMBER}"
+            TAG="v${VERSION}-build.$(git rev-list --count HEAD)"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Tag: $TAG"
