@@ -19,6 +19,9 @@ const view = (over: Partial<SettingsView> = {}): SettingsView => ({
   ],
   default_profile_id: 'o',
   general,
+  presets: [],
+  skills: [],
+  default_skill_id: null,
   stt_has_key: false,
   secrets_backend: 'keyring',
   load_warning: null,
@@ -130,5 +133,11 @@ describe('SettingsModal', () => {
     await waitFor(() =>
       expect(document.querySelector('datalist#model-suggestions option[value="deepseek-reasoner"]')).not.toBeNull()
     );
+  });
+
+  it('has a Skills tab', () => {
+    renderModal();
+    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    expect(screen.getByRole('button', { name: '+ Thêm skill' })).toBeDefined();
   });
 });

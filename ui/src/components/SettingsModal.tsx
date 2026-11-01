@@ -10,6 +10,7 @@ import type {
   WhisperModelInfo,
 } from '../types';
 import * as ipc from '../lib/ipc';
+import { SkillsTab, type SkillsApi } from './SkillsTab';
 import {
   KIND_ICONS,
   KIND_LABELS,
@@ -46,6 +47,7 @@ interface SettingsModalProps {
   onGeneralChange: (g: GeneralSettings) => void;
   whisperModels: WhisperModelInfo[];
   api?: SettingsApi;
+  skillsApi?: SkillsApi;
 }
 
 const toProfile = ({ has_key: _hasKey, ...p }: ProfileView): ProviderProfile => p;
@@ -62,8 +64,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onGeneralChange,
   whisperModels,
   api = defaultApi,
+  skillsApi,
 }) => {
-  const [tab, setTab] = useState<'providers' | 'general'>('providers');
+  const [tab, setTab] = useState<'providers' | 'general' | 'skills'>('providers');
   const [selectedId, setSelectedId] = useState<string | null>(settings.default_profile_id);
   const [form, setForm] = useState<ProviderProfile>(emptyProfile());
   const [apiKey, setApiKey] = useState('');
@@ -156,6 +159,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               Chung
             </button>
+            <button
+              onClick={() => setTab('skills')}
+              className={`px-3 py-1 rounded ${tab === 'skills' ? 'bg-blue-600 text-white' : 'bg-slate-700'}`}
+            >
+              Skills
+            </button>
           </div>
           <button onClick={onClose} aria-label="Đóng" className="text-slate-400 hover:text-white">
             <X className="w-4 h-4" />
@@ -169,7 +178,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         )}
 
-        {tab === 'providers' ? (
+        {tab === 'skills' ? (
+          <SkillsTab
+            settings={settings}
+            onSettingsChange={onSettingsChange}
+            targetLang={general.target_lang}
+            api={skillsApi}
+          />
+        ) : tab === 'providers' ? (
           <div className="flex-1 min-h-0 flex gap-3 p-4">
             <div className="w-48 shrink-0 flex flex-col gap-1 overflow-y-auto">
               {settings.profiles.map((p) => (
