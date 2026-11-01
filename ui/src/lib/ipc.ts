@@ -1,9 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import type {
   SystemInfo,
   PipelineConfig,
   ExportRequest,
   SubtitleSegment,
+  PipelineProgressEvent,
 } from '../types';
 
 export function isTauri(): boolean {
@@ -46,7 +48,22 @@ export async function downloadWhisperModel(modelName: string): Promise<void> {
 export async function startPipeline(config: PipelineConfig): Promise<SubtitleSegment[]> {
   if (!isTauri()) {
     console.info('[Echo Studio] Simulating pipeline processing in browser mode');
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const emitSimulated = (event: PipelineProgressEvent) => {
+      window.dispatchEvent(new CustomEvent('echo:pipeline-progress', { detail: event }));
+    };
+
+    emitSimulated({ stage: 'extract_audio', message: 'Đang trích xuất audio...', percentage: 5, elapsed_secs: 0 });
+    await new Promise((r) => setTimeout(r, 200));
+    emitSimulated({ stage: 'extract_audio', message: 'Trích xuất audio hoàn tất.', percentage: 10, elapsed_secs: 0 });
+    await new Promise((r) => setTimeout(r, 200));
+    emitSimulated({ stage: 'stt', message: 'Đang nhận dạng Whisper...', percentage: 35, elapsed_secs: 1 });
+    await new Promise((r) => setTimeout(r, 300));
+    emitSimulated({ stage: 'stt', message: 'Nhận dạng hoàn tất: 3 đoạn thoại.', percentage: 60, current_step: 3, total_steps: 3, elapsed_secs: 1 });
+    await new Promise((r) => setTimeout(r, 200));
+    emitSimulated({ stage: 'translate', message: 'Đang dịch 2/3 đoạn...', percentage: 85, current_step: 2, total_steps: 3, elapsed_secs: 2 });
+    await new Promise((r) => setTimeout(r, 300));
+    emitSimulated({ stage: 'ready', message: 'Hoàn tất! Đã tạo 3 đoạn phụ đề.', percentage: 100, current_step: 3, total_steps: 3, elapsed_secs: 2 });
+
     return [
       {
         id: 1,
@@ -72,6 +89,20 @@ export async function startPipeline(config: PipelineConfig): Promise<SubtitleSeg
     ];
   }
   return await invoke<SubtitleSegment[]>('start_pipeline', { config });
+}
+
+export async function listenPipelineProgress(
+  handler: (event: PipelineProgressEvent) => void
+): Promise<() => void> {
+  if (isTauri()) {
+    return await listen<PipelineProgressEvent>('pipeline-progress', (e) => handler(e.payload));
+  } else {
+    const listener = (e: Event) => {
+      handler((e as CustomEvent<PipelineProgressEvent>).detail);
+    };
+    window.addEventListener('echo:pipeline-progress', listener);
+    return () => window.removeEventListener('echo:pipeline-progress', listener);
+  }
 }
 
 export async function cancelPipeline(): Promise<void> {

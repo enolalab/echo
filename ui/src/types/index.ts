@@ -49,3 +49,12 @@ export interface PipelineStageEvent {
   stage: 'extract_audio' | 'stt' | 'translate' | 'ready';
   message: string;
 }
+
+export interface PipelineProgressEvent {
+  stage: 'extract_audio' | 'stt' | 'translate' | 'ready';
+  message: string;
+  percentage: number;
+  current_step?: number;
+  total_steps?: number;
+  elapsed_secs: number;
+}

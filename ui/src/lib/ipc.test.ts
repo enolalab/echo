@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { getSystemInfo } from './ipc';
+import { getSystemInfo, listenPipelineProgress } from './ipc';
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn().mockImplementation((cmd: string) => {
@@ -17,11 +17,35 @@ vi.mock('@tauri-apps/api/core', () => ({
   }),
 }));
 
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn().mockImplementation((_event: string, cb: (e: any) => void) => {
+    cb({
+      payload: {
+        stage: 'translate',
+        message: 'Đang dịch...',
+        percentage: 75.0,
+        elapsed_secs: 15,
+      },
+    });
+    return Promise.resolve(() => {});
+  }),
+}));
+
 describe('IPC Client', () => {
   it('fetches system info correctly', async () => {
     const info = await getSystemInfo();
     expect(info.ollama_running).toBe(true);
     expect(info.ollama_models).toContain('qwen2.5:7b');
     expect(info.whisper_models[0].name).toBe('base');
+  });
+
+  it('listens to pipeline progress events', async () => {
+    let received: any = null;
+    const unlisten = await listenPipelineProgress((event) => {
+      received = event;
+    });
+    expect(received).not.toBeNull();
+    expect(received.percentage).toBe(75.0);
+    unlisten();
   });
 });
