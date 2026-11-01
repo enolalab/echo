@@ -91,6 +91,30 @@ The compiled binary will be located at `target/release/auto-subtitle`.
 
 ---
 
+## 🖥️ Echo Studio (Desktop GUI)
+
+Echo includes a modern, high-performance desktop studio app powered by **Tauri v2** and **React + Tailwind CSS**:
+
+- **Studio All-in-One Layout:** Integrated video player with real-time subtitle preview and editable subtitle table.
+- **Bidirectional Video Sync:** Click any subtitle segment to seek video; playback automatically highlights and auto-scrolls the active row.
+- **Auto Model & GPU Detection:** Auto-detects NVIDIA CUDA GPU acceleration, probes local Ollama models (`localhost:11434`), and manages Whisper model downloads with 1-click in the UI.
+- **Visual Styling Presets:** Choose from *YouTube Yellow*, *Classic White*, *Netflix Modern*, and *Bilingual Highlight*.
+
+### Launching the Desktop UI
+
+```bash
+# 1. Install frontend dependencies
+npm --prefix ui install
+
+# 2. Run in desktop development mode
+npm --prefix ui run tauri dev
+
+# 3. Build standalone installer / binary package
+npm --prefix ui run tauri build
+```
+
+---
+
 ## 💻 CLI Options
 
 | Flag | Short | Default | Description |
