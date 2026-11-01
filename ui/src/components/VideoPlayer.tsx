@@ -5,8 +5,6 @@ import {
   RotateCcw,
   Volume2,
   VolumeX,
-  Maximize2,
-  Minimize2,
   FastForward,
   Rewind,
   Repeat,
@@ -48,10 +46,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [durationMs, setDurationMs] = useState(0);
-  const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Convert local filesystem path to Tauri Asset URL safely
   const videoSrc = React.useMemo(() => {
@@ -265,7 +261,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               }}
               className="p-1 hover:text-white"
             >
-              {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
             </button>
           </div>
         </div>
