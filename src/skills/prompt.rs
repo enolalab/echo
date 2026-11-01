@@ -23,11 +23,11 @@ fn term_matches(haystack: &str, term: &str) -> bool {
         let before_ok = haystack[..i]
             .chars()
             .next_back()
-            .map_or(true, |c| !c.is_ascii_alphanumeric());
+            .is_none_or(|c| !c.is_ascii_alphanumeric());
         let after_ok = haystack[i + m.len()..]
             .chars()
             .next()
-            .map_or(true, |c| !c.is_ascii_alphanumeric());
+            .is_none_or(|c| !c.is_ascii_alphanumeric());
         before_ok && after_ok
     })
 }
