@@ -70,6 +70,6 @@ jobs:
         with:
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseName: "Echo Studio ${{ github.event.inputs.tag || github.ref_name }}"
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
