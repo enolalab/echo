@@ -3,6 +3,12 @@ name = "auto-subtitle"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+members = [
+    ".",
+    "src-tauri"
+]
+
 [lib]
 name = "auto_subtitle"
 path = "src/lib.rs"
