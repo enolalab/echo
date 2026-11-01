@@ -58,24 +58,70 @@ pub struct Cli {
     #[arg(long, default_value = "whisper-1")]
     pub stt_api_model: String,
 
-    #[arg(long, value_enum, default_value_t = TranslateEngine::Ollama)]
-    pub translate_engine: TranslateEngine,
+    #[arg(long, value_enum)]
+    pub translate_engine: Option<TranslateEngine>,
 
-    #[arg(long, default_value = "qwen2.5:7b")]
-    pub ollama_model: String,
+    #[arg(long)]
+    pub ollama_model: Option<String>,
 
-    #[arg(long, default_value = "http://localhost:11434")]
-    pub ollama_url: String,
+    #[arg(long)]
+    pub ollama_url: Option<String>,
 
     #[arg(long, env = "OPENAI_API_KEY", hide_env_values = true)]
     pub api_key: Option<String>,
 
-    #[arg(long, default_value = "https://api.openai.com/v1")]
-    pub api_base_url: String,
+    #[arg(long)]
+    pub api_base_url: Option<String>,
 
-    #[arg(long, default_value = "gpt-4o-mini")]
-    pub api_model: String,
+    #[arg(long)]
+    pub api_model: Option<String>,
+
+    /// Provider profile name or id from settings.json
+    #[arg(long)]
+    pub profile: Option<String>,
+
+    /// Print configured provider profiles and exit
+    #[arg(long)]
+    pub list_profiles: bool,
 
     #[arg(long)]
     pub keep_temp: bool,
+}
+
+use crate::settings::{ProviderProfile, Settings};
+
+pub const DEFAULT_OLLAMA_MODEL: &str = "qwen2.5:7b";
+pub const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
+pub const DEFAULT_API_BASE_URL: &str = "https://api.openai.com/v1";
+pub const DEFAULT_API_MODEL: &str = "gpt-4o-mini";
+
+impl Cli {
+    pub fn api_base_url_or_default(&self) -> String {
+        self.api_base_url.clone().unwrap_or_else(|| DEFAULT_API_BASE_URL.to_string())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum TranslatorChoice {
+    Legacy(TranslateEngine),
+    Profile(ProviderProfile),
+}
+
+pub fn choose_translator(cli: &Cli, settings: Option<&Settings>) -> anyhow::Result<TranslatorChoice> {
+    if let Some(engine) = cli.translate_engine {
+        return Ok(TranslatorChoice::Legacy(engine));
+    }
+    match (cli.profile.as_deref(), settings) {
+        (Some(q), Some(s)) => s.find_profile(q).cloned().map(TranslatorChoice::Profile).ok_or_else(|| {
+            let names: Vec<&str> = s.profiles.iter().map(|p| p.name.as_str()).collect();
+            anyhow::anyhow!("Không tìm thấy profile '{q}'. Có: {}", names.join(", "))
+        }),
+        (Some(_), None) => anyhow::bail!("Không đọc được settings.json nên không dùng được --profile"),
+        (None, Some(s)) => Ok(s
+            .default_profile()
+            .cloned()
+            .map(TranslatorChoice::Profile)
+            .unwrap_or(TranslatorChoice::Legacy(TranslateEngine::Ollama))),
+        (None, None) => Ok(TranslatorChoice::Legacy(TranslateEngine::Ollama)),
+    }
 }
