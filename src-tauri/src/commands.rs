@@ -16,8 +16,38 @@ use auto_subtitle::translate::Translator;
 
 use crate::state::AppState;
 use crate::types::{
-    ExportMode, ExportRequest, PipelineConfig, StylePreset, SystemInfo, WhisperModelInfo,
+    ExportMode, ExportRequest, PipelineConfig, PipelineProgressEvent, StylePreset, SystemInfo,
+    WhisperModelInfo,
 };
+
+fn emit_progress(
+    app: &AppHandle,
+    start_time: std::time::Instant,
+    stage: &str,
+    message: &str,
+    percentage: f64,
+    current_step: Option<usize>,
+    total_steps: Option<usize>,
+) {
+    let _ = app.emit(
+        "pipeline-progress",
+        PipelineProgressEvent {
+            stage: stage.to_string(),
+            message: message.to_string(),
+            percentage: percentage.clamp(0.0, 100.0),
+            current_step,
+            total_steps,
+            elapsed_secs: start_time.elapsed().as_secs(),
+        },
+    );
+    let _ = app.emit(
+        "pipeline-stage",
+        serde_json::json!({
+            "stage": stage,
+            "message": message,
+        }),
+    );
+}
 
 fn get_app_config() -> AppConfig {
     AppConfig::load().unwrap_or_else(|_| {
@@ -162,11 +192,18 @@ pub async fn start_pipeline(
         .await
         .map_err(|e| format!("Không tìm thấy FFmpeg: {e:#}"))?;
 
+    let start_time = std::time::Instant::now();
+
     // Phase 1: Extract Audio
-    let _ = app.emit("pipeline-stage", serde_json::json!({
-        "stage": "extract_audio",
-        "message": "Đang trích xuất âm thanh từ video..."
-    }));
+    emit_progress(
+        &app,
+        start_time,
+        "extract_audio",
+        "Đang trích xuất âm thanh từ video...",
+        0.0,
+        None,
+        None,
+    );
     let temp_dir = tempfile::tempdir().map_err(|e| e.to_string())?;
     let wav_path = temp_dir.path().join("audio_16k.wav");
 
@@ -181,23 +218,81 @@ pub async fn start_pipeline(
         Some(Err(e)) => return Err(format!("Lỗi luồng: {e:#}")),
         None => return Err("Tiến trình đã bị người dùng hủy.".to_string()),
     }
+    emit_progress(
+        &app,
+        start_time,
+        "extract_audio",
+        "Trích xuất âm thanh hoàn tất.",
+        10.0,
+        None,
+        None,
+    );
 
     // Phase 2: Transcribe (STT)
-    let _ = app.emit("pipeline-stage", serde_json::json!({
-        "stage": "stt",
-        "message": "Đang nhận dạng giọng nói (Whisper)..."
-    }));
+    emit_progress(
+        &app,
+        start_time,
+        "stt",
+        &format!("Đang tải và chuẩn bị model Whisper ({})...", config.whisper_model),
+        12.0,
+        None,
+        None,
+    );
 
     let model_path = dm
         .ensure_whisper_model(&config.whisper_model)
         .await
         .map_err(|e| format!("Lỗi tải model Whisper: {e:#}"))?;
 
+    emit_progress(
+        &app,
+        start_time,
+        "stt",
+        &format!("Đang nhận dạng âm thanh với Whisper ({})...", config.whisper_model),
+        18.0,
+        None,
+        None,
+    );
+
     let transcriber = LocalWhisperTranscriber::new(model_path, None, true);
+    let app_stt = app.clone();
+    let model_name = config.whisper_model.clone();
+
+    // Spawn smooth progress ticker during transcription
+    let (ticker_stop_tx, mut ticker_stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let ticker_handle = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(800));
+        let mut current_pct = 20.0;
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    if current_pct < 58.0 {
+                        current_pct += 1.2;
+                    }
+                    emit_progress(
+                        &app_stt,
+                        start_time,
+                        "stt",
+                        &format!("Đang nhận dạng âm thanh với Whisper ({})...", model_name),
+                        current_pct,
+                        None,
+                        None,
+                    );
+                }
+                _ = &mut ticker_stop_rx => {
+                    break;
+                }
+            }
+        }
+    });
+
     let transcribe_res = tokio::select! {
         res = transcriber.transcribe(&wav_path) => Some(res),
         _ = cancel_rx.recv() => None,
     };
+    let _ = ticker_stop_tx.send(());
+    let _ = ticker_handle.await;
+
     let mut segments = match transcribe_res {
         Some(Ok(segs)) => segs,
         Some(Err(e)) => return Err(format!("Lỗi nhận dạng Whisper: {e:#}")),
@@ -209,12 +304,27 @@ pub async fn start_pipeline(
         return Err("Không nhận dạng được lời thoại nào trong video.".to_string());
     }
 
+    emit_progress(
+        &app,
+        start_time,
+        "stt",
+        &format!("Nhận dạng hoàn tất: tìm thấy {} đoạn thoại.", segments.len()),
+        60.0,
+        Some(segments.len()),
+        Some(segments.len()),
+    );
+
     // Phase 3: Translate
     if !config.skip_translate {
-        let _ = app.emit("pipeline-stage", serde_json::json!({
-            "stage": "translate",
-            "message": format!("Đang dịch {} đoạn phụ đề sang {}...", segments.len(), config.target_lang)
-        }));
+        emit_progress(
+            &app,
+            start_time,
+            "translate",
+            &format!("Bắt đầu dịch {} đoạn phụ đề sang {}...", segments.len(), config.target_lang),
+            60.0,
+            Some(0),
+            Some(segments.len()),
+        );
 
         let translator: Box<dyn Translator> = if config.use_cloud_llm {
             let api_key = config.llm_api_key.unwrap_or_default();
@@ -229,12 +339,29 @@ pub async fn start_pipeline(
 
         let mut segments_to_translate = segments.clone();
         let target_lang = config.target_lang.clone();
+        let app_translate = app.clone();
+        let target_lang_cb = target_lang.clone();
+
+        let on_progress = move |done: usize, total: usize| {
+            let pct = 60.0 + ((done as f64 / total as f64) * 38.0);
+            emit_progress(
+                &app_translate,
+                start_time,
+                "translate",
+                &format!("Đang dịch {}/{} đoạn phụ đề sang {}...", done, total, target_lang_cb),
+                pct,
+                Some(done),
+                Some(total),
+            );
+        };
+
         let translate_res = tokio::select! {
-            res = auto_subtitle::pipeline::translate_all(
+            res = auto_subtitle::pipeline::translate_all_with_progress(
                 translator.as_ref(),
                 &mut segments_to_translate,
                 "auto",
                 &target_lang,
+                Some(on_progress),
             ) => Some(res),
             _ = cancel_rx.recv() => None,
         };
@@ -247,10 +374,15 @@ pub async fn start_pipeline(
         };
     }
 
-    let _ = app.emit("pipeline-stage", serde_json::json!({
-        "stage": "ready",
-        "message": "Hoàn tất! Sẵn sàng biên tập và xem trước."
-    }));
+    emit_progress(
+        &app,
+        start_time,
+        "ready",
+        &format!("Hoàn tất! Đã tạo {} đoạn phụ đề.", segments.len()),
+        100.0,
+        Some(segments.len()),
+        Some(segments.len()),
+    );
 
     Ok(segments)
 }
