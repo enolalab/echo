@@ -26,7 +26,7 @@ pub struct Settings {
     pub general: GeneralSettings,
 }
 
-#[serde(rename_all = "snake_case")]
+// JSON values: "openai", "openai_compatible", "anthropic", "anthropic_compatible", "deepseek", "ollama"
 pub enum ProviderKind { OpenAi, OpenAiCompatible, Anthropic, AnthropicCompatible, DeepSeek, Ollama }
 
 pub struct ProviderProfile {
@@ -70,7 +70,7 @@ pub trait SecretStore: Send + Sync {
 ```
 
 - Accounts: `profile:<id>` for LLM keys, `stt:openai` for the Whisper API key.
-- `KeyringStore` — crate `keyring`, service `com.echo.subtitles`.
+- `KeyringStore` — crate `keyring` **3.6** (stable sync API; 4.x has a new API), features `apple-native`, `windows-native`, `sync-secret-service`, `crypto-rust`; service `com.echo.subtitles`. Linux CI needs `libdbus-1-dev`.
 - `FileStore` — `secrets.json` next to `settings.json`, permissions `0600` on Unix.
 - `open_secret_store()` probes the keyring once (set + get + delete a probe entry). On any failure it returns `FileStore` and reports `SecretsBackend::File`; otherwise `SecretsBackend::Keyring`.
 
@@ -126,9 +126,14 @@ HTTP 401/403 → `Auth`; 404 → `NotFound`; 429 → `RateLimit`; reqwest timeou
 pub struct LlmTranslator { client: Box<dyn ChatClient>, system_prompt: Option<String> }
 ```
 
-Implements the existing `Translator` trait: `build_translation_prompt` → `client.chat(system_prompt, prompt)` → `parse_translated_lines`. Retries `RateLimit` and HTTP 5xx with backoff 2s, 4s, 8s (max 3 retries); `Auth` and `NotFound` fail immediately.
+Implements the existing `Translator` trait: `build_translation_prompt` → `client.chat(system_prompt, prompt)` → `parse_translated_lines`. It does **not** retry itself; it returns the `LlmError` wrapped in `anyhow::Error` so the pipeline can inspect it.
 
-`OllamaTranslator` and `OpenAiCompatTranslator` are deleted; their HTTP code moves into the chat clients. `Translator` and `pipeline.rs` are unchanged.
+Retry lives in the existing loop in `pipeline::translate_all_with_progress` (`MAX_ATTEMPTS = 3`). Changes to that loop:
+- If the error chain contains an `LlmError` with `!is_retryable()` (`Auth`, `NotFound`, `Other` with 4xx status) → stop immediately.
+- If it is `RateLimit` or `Other` with 5xx status → sleep `2s × attempt` (2s, then 4s) before the next attempt.
+- Any other error (including non-`LlmError` errors from test doubles) → retry immediately, as today.
+
+`OllamaTranslator` and `OpenAiCompatTranslator` are deleted; their HTTP code moves into the chat clients. The `Translator` trait is unchanged; `pipeline.rs` changes only in the retry loop described above.
 
 ### Connection test
 
@@ -153,9 +158,11 @@ Implements the existing `Translator` trait: `build_translation_prompt` → `clie
 
 Remove `use_cloud_llm`, `llm_model`, `llm_api_base`, `llm_api_key`, `stt_api_key`. Add `profile_id: Option<String>` (`None` = default profile). The backend resolves the profile and reads keys from the secret store, so keys never cross IPC during a pipeline run. Starting a pipeline with no resolvable profile while translation is enabled fails with "Chưa cấu hình provider dịch".
 
+`use_cloud_stt` stays on `PipelineConfig`. Today the desktop pipeline ignores it and always runs local Whisper; after this change, `use_cloud_stt = true` extracts MP3 (`media::build_extract_mp3_command`) and transcribes with `ApiTranscriber` (`https://api.openai.com/v1`, model `whisper-1`) using the `stt:openai` secret. Missing key fails with "Chưa nhập API key Whisper".
+
 ### UI (functional; restyled in sub-project C)
 
-- **HeaderBar**: the Ollama model select becomes a **Profile** select (profile name + kind icon); add a ⚙️ button opening Settings.
+- **HeaderBar**: the Ollama model select becomes a **Profile** select (profile name + kind icon); add a ⚙️ button opening Settings. Changing the select calls `set_default_profile`, so the header always shows and persists the default profile (one concept, no separate "session profile").
 - **`SettingsModal`** (new component), two tabs:
   - *Providers*: profile list (left, with "+ Thêm", default marked ★) and form (right): Kind, Name, Base URL (placeholder = kind default), API key (password input; shows "••• đã lưu" when `has_key`, empty input = keep), Model (combobox: suggestions from `list_profile_models`, fetched on open and on a ↻ button; free text always allowed). Buttons: Test kết nối (shows ✅ latency or ❌ message inline), Lưu, Xóa (confirm), Đặt mặc định.
   - *Chung*: Whisper model, STT cloud toggle + Whisper API key field, target language, bilingual, style preset.
@@ -174,7 +181,7 @@ Remove `use_cloud_llm`, `llm_model`, `llm_api_base`, `llm_api_key`, `stt_api_key
 - To detect "given explicitly", `translate_engine`, `ollama_model`, `ollama_url`, `api_base_url`, `api_model` change from `default_value` to `Option<_>`; the current defaults (`ollama`, `qwen2.5:7b`, `http://localhost:11434`, `https://api.openai.com/v1`, `gpt-4o-mini`) are applied in code on the legacy path.
 - `--stt-engine api` without `--api-key`/`OPENAI_API_KEY` reads the `stt:openai` secret.
 - The CLI reads only profiles and secrets, **not** `GeneralSettings`; its existing flag defaults (e.g. `--whisper-model small`) are unchanged.
-- New flag `--list-profiles` printing `name | kind | model | default` and exiting. `--input` becomes optional at the clap level and is validated as required when `--list-profiles` is absent (avoids restructuring the CLI into subcommands).
+- New flag `--list-profiles` printing `name | kind | model | default` and exiting. `main.rs` checks for this flag in raw `std::env::args()` **before** `Cli::parse()`, so `--input` stays a required `PathBuf` and `pipeline.rs` is untouched. The flag is also declared on `Cli` (`#[arg(long)] list_profiles: bool`) so it appears in `--help`.
 
 ## 4. Testing
 
@@ -185,7 +192,8 @@ Rust (`cargo test`, using the existing `wiremock` dev-dependency):
 - `settings`: round-trip serialize/deserialize; defaults created when file missing; corrupt file → `.bak` + defaults + warning; atomic write leaves no partial file; validation (duplicate name, empty compatible base URL).
 - `secrets`: `FileStore` get/set/delete in a `tempfile` dir; 0600 permission on Unix. `KeyringStore` is not unit-tested (needs OS keychain); `open_secret_store` fallback logic is tested via an injected failing store.
 - `llm` clients, each against `wiremock`: correct URL, headers (`Authorization` vs `x-api-key` + `anthropic-version`), system-prompt placement, response parsing, model-list parsing; status → `LlmError` mapping (401, 404, 429, 500, timeout).
-- `LlmTranslator`: retries on 429/5xx then succeeds; no retry on 401; existing prompt/parse behaviour preserved (reuse current translator tests).
+- `LlmTranslator`: system prompt forwarded to the client; existing prompt/parse behaviour preserved (reuse current translator tests).
+- `pipeline::translate_all_with_progress`: stops after 1 attempt on `LlmError::Auth`; retries with backoff on `RateLimit` (tested with `tokio::time::pause`); existing retry test still passes.
 - CLI: `--profile` resolution by name and id; unknown profile error; explicit `--translate-engine` takes the legacy path even when a default profile exists; `--list-profiles` works without `--input`.
 
 Frontend (`vitest`, existing setup):

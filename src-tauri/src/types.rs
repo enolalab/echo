@@ -18,6 +18,8 @@ pub struct SystemInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PipelineConfig {
+    #[serde(default)]
+    pub job_id: Option<String>,
     pub video_path: String,
     pub subtitle_path: Option<String>,
     pub whisper_model: String,
@@ -61,6 +63,7 @@ pub struct ExportRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PipelineProgressEvent {
+    pub job_id: String,
     pub stage: String,
     pub message: String,
     pub percentage: f64,
@@ -108,6 +111,7 @@ mod tests {
     #[test]
     fn test_pipeline_progress_event_serialization() {
         let event = PipelineProgressEvent {
+            job_id: "job-1".to_string(),
             stage: "translate".to_string(),
             message: "Đang dịch 15/45 đoạn...".to_string(),
             percentage: 72.5,

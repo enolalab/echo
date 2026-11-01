@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Terminal, ChevronUp, ChevronDown, CheckCircle2, Loader2 } from 'lucide-react';
+import { Terminal, ChevronUp, ChevronDown, CheckCircle2, Loader2, Copy, Check } from 'lucide-react';
 import type { PipelineStageEvent, PipelineProgressEvent } from '../types';
 
 interface ProgressDrawerProps {
@@ -33,6 +33,17 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
   canExport,
 }) => {
   const [showLogs, setShowLogs] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyLogs = () => {
+    const text = logs.join('\n');
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      });
+    }
+  };
 
   const activeStageKey = progress?.stage || currentStage?.stage;
   const getStageIndex = (stageKey?: string) => {
@@ -147,7 +158,25 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
 
       {/* Expandable Console Logs */}
       {showLogs && (
-        <div className="h-36 bg-black/90 border-t border-slate-800 p-3 font-mono text-[11px] text-slate-300 overflow-y-auto flex flex-col gap-1">
+        <div className="relative h-36 bg-black/90 border-t border-slate-800">
+          <button
+            onClick={handleCopyLogs}
+            className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-slate-800/90 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-600 text-[10px] transition"
+            title="Copy toàn bộ log"
+          >
+            {copied ? (
+              <>
+                <Check className="w-3 h-3 text-emerald-400" />
+                <span className="text-emerald-400">Đã copy</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3 h-3" />
+                <span>Copy</span>
+              </>
+            )}
+          </button>
+          <div className="h-full p-3 font-mono text-[11px] text-slate-300 overflow-y-auto flex flex-col gap-1 select-text cursor-text">
           {logs.length > 0 ? (
             logs.map((log, i) => (
               <div key={i} className="leading-relaxed">
@@ -158,6 +187,7 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
           ) : (
             <div className="text-slate-600 italic">Chưa có thông điệp log nào.</div>
           )}
+          </div>
         </div>
       )}
     </div>

@@ -1,0 +1,21 @@
+# Build artifacts & dependencies
+target/
+../node_modules/
+../ui/node_modules/
+../ui/dist/
+
+# Media & generated outputs (avoid dev-restart on render)
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.webm
+*.flv
+*.wmv
+*.mp3
+*.wav
+*.m4a
+*.flac
+*.ogg
+*.srt
+*.ass

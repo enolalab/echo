@@ -16,6 +16,8 @@ fn main() {
             export_subtitles,
             open_in_file_manager,
             pick_video_file,
+            pick_video_files,
+            get_output_dir,
             pick_save_file
         ])
         .run(tauri::generate_context!())

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Film, Layers, FileCode, FolderOpen, CheckCircle, Loader2, Folder } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Film, Layers, FileCode, FolderOpen, CheckCircle, Loader2, Folder, Play } from 'lucide-react';
 import type { ExportMode, StylePreset, ExportRequest, SubtitleSegment } from '../types';
 import { pickSaveFile } from '../lib/ipc';
 
@@ -13,6 +13,7 @@ interface ExportModalProps {
   initialBilingual: boolean;
   onExport: (req: ExportRequest) => Promise<string>;
   onOpenFolder: (path: string) => void;
+  onExported?: (outputPath: string | null) => void;
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({
@@ -25,6 +26,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   initialBilingual,
   onExport,
   onOpenFolder,
+  onExported,
 }) => {
   const [mode, setMode] = useState<ExportMode>('hardsub');
   const [outputPath, setOutputPath] = useState(defaultOutputPath);
@@ -33,6 +35,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [isExporting, setIsExporting] = useState(false);
   const [exportResult, setExportResult] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Keep output path in sync when the modal (re)opens or the suggested path changes
+  useEffect(() => {
+    if (isOpen) {
+      setOutputPath(defaultOutputPath);
+      setExportResult(null);
+      setErrorMsg(null);
+    }
+  }, [isOpen, defaultOutputPath]);
 
   if (!isOpen) return null;
 
@@ -60,6 +71,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         segments,
       });
       setExportResult(result);
+      onExported?.(mode === 'subs_only' ? null : outputPath);
     } catch (err) {
       setErrorMsg(String(err));
     } finally {
@@ -205,13 +217,24 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 <CheckCircle className="w-4 h-4 shrink-0" />
                 <span>{exportResult}</span>
               </div>
-              <button
-                onClick={() => onOpenFolder(outputPath)}
-                className="flex items-center gap-1 bg-emerald-800/60 hover:bg-emerald-800 text-white px-2 py-1 rounded text-[11px] transition"
-              >
-                <FolderOpen className="w-3 h-3" />
-                <span>Mở thư mục</span>
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {mode !== 'subs_only' && (
+                  <button
+                    onClick={onClose}
+                    className="flex items-center gap-1 bg-blue-700/70 hover:bg-blue-600 text-white px-2 py-1 rounded text-[11px] transition"
+                  >
+                    <Play className="w-3 h-3" />
+                    <span>Xem kết quả</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => onOpenFolder(outputPath)}
+                  className="flex items-center gap-1 bg-emerald-800/60 hover:bg-emerald-800 text-white px-2 py-1 rounded text-[11px] transition"
+                >
+                  <FolderOpen className="w-3 h-3" />
+                  <span>Mở thư mục</span>
+                </button>
+              </div>
             </div>
           )}
 

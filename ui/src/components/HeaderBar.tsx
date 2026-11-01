@@ -14,6 +14,7 @@ import type { SystemInfo, StylePreset } from '../types';
 
 interface HeaderBarProps {
   videoPath: string;
+  jobCount?: number;
   onSelectVideo: () => void;
   whisperModel: string;
   onSelectWhisperModel: (m: string) => void;
@@ -35,6 +36,7 @@ interface HeaderBarProps {
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
   videoPath,
+  jobCount = 0,
   onSelectVideo,
   whisperModel,
   onSelectWhisperModel,
@@ -55,7 +57,11 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
 }) => {
   const currentWhisperInfo = systemInfo?.whisper_models.find((m) => m.name === whisperModel);
   const isDownloaded = currentWhisperInfo?.downloaded ?? true;
-  const fileName = videoPath ? videoPath.split(/[/\\]/).pop() : 'Chưa chọn video';
+  const fileName = videoPath
+    ? videoPath.split(/[/\\]/).pop()
+    : jobCount > 0
+      ? `${jobCount} file`
+      : 'Chọn video...';
 
   return (
     <header className="h-16 bg-slate-800/90 backdrop-blur border-b border-slate-700/80 px-4 flex items-center justify-between gap-4 text-xs select-none z-20">
@@ -220,9 +226,9 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         ) : (
           <button
             onClick={onStart}
-            disabled={!videoPath}
+            disabled={!videoPath && jobCount === 0}
             className={`flex items-center gap-1.5 font-semibold px-4 py-1.5 rounded-md shadow transition ${
-              videoPath
+              videoPath || jobCount > 0
                 ? 'bg-blue-600 hover:bg-blue-500 text-white cursor-pointer'
                 : 'bg-slate-700 text-slate-500 cursor-not-allowed'
             }`}

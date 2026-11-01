@@ -22,6 +22,7 @@ use crate::types::{
 
 fn emit_progress(
     app: &AppHandle,
+    job_id: &str,
     start_time: std::time::Instant,
     stage: &str,
     message: &str,
@@ -32,6 +33,7 @@ fn emit_progress(
     let _ = app.emit(
         "pipeline-progress",
         PipelineProgressEvent {
+            job_id: job_id.to_string(),
             stage: stage.to_string(),
             message: message.to_string(),
             percentage: percentage.clamp(0.0, 100.0),
@@ -43,6 +45,7 @@ fn emit_progress(
     let _ = app.emit(
         "pipeline-stage",
         serde_json::json!({
+            "job_id": job_id,
             "stage": stage,
             "message": message,
         }),
@@ -160,10 +163,22 @@ pub async fn download_whisper_model(
 }
 
 #[tauri::command]
-pub async fn cancel_pipeline(state: State<'_, AppState>) -> Result<(), String> {
-    let mut sender_guard = state.cancel_sender.lock().await;
-    if let Some(sender) = sender_guard.take() {
-        let _ = sender.send(());
+pub async fn cancel_pipeline(
+    state: State<'_, AppState>,
+    job_id: Option<String>,
+) -> Result<(), String> {
+    let sender_guard = state.cancel_senders.lock().await;
+    match job_id {
+        Some(id) => {
+            if let Some(sender) = sender_guard.get(&id) {
+                let _ = sender.send(());
+            }
+        }
+        None => {
+            for sender in sender_guard.values() {
+                let _ = sender.send(());
+            }
+        }
     }
     Ok(())
 }
@@ -174,11 +189,32 @@ pub async fn start_pipeline(
     state: State<'_, AppState>,
     config: PipelineConfig,
 ) -> Result<Vec<SubtitleSegment>, String> {
-    let (cancel_tx, mut cancel_rx) = broadcast::channel(1);
+    let job_id = config
+        .job_id
+        .clone()
+        .unwrap_or_else(|| "default".to_string());
+    let (cancel_tx, cancel_rx) = broadcast::channel(1);
     {
-        let mut sender_guard = state.cancel_sender.lock().await;
-        *sender_guard = Some(cancel_tx);
+        let mut senders = state.cancel_senders.lock().await;
+        senders.insert(job_id.clone(), cancel_tx);
     }
+
+    let result = run_pipeline(app, config, job_id.clone(), cancel_rx).await;
+
+    {
+        let mut senders = state.cancel_senders.lock().await;
+        senders.remove(&job_id);
+    }
+
+    result
+}
+
+async fn run_pipeline(
+    app: AppHandle,
+    config: PipelineConfig,
+    job_id: String,
+    mut cancel_rx: broadcast::Receiver<()>,
+) -> Result<Vec<SubtitleSegment>, String> {
 
     let input_video = PathBuf::from(&config.video_path);
     if !input_video.is_file() {
@@ -196,8 +232,9 @@ pub async fn start_pipeline(
 
     // Phase 1: Extract Audio
     emit_progress(
-        &app,
-        start_time,
+            &app,
+            &job_id,
+            start_time,
         "extract_audio",
         "Đang trích xuất âm thanh từ video...",
         0.0,
@@ -219,8 +256,9 @@ pub async fn start_pipeline(
         None => return Err("Tiến trình đã bị người dùng hủy.".to_string()),
     }
     emit_progress(
-        &app,
-        start_time,
+            &app,
+            &job_id,
+            start_time,
         "extract_audio",
         "Trích xuất âm thanh hoàn tất.",
         10.0,
@@ -230,8 +268,9 @@ pub async fn start_pipeline(
 
     // Phase 2: Transcribe (STT)
     emit_progress(
-        &app,
-        start_time,
+            &app,
+            &job_id,
+            start_time,
         "stt",
         &format!("Đang tải và chuẩn bị model Whisper ({})...", config.whisper_model),
         12.0,
@@ -245,8 +284,9 @@ pub async fn start_pipeline(
         .map_err(|e| format!("Lỗi tải model Whisper: {e:#}"))?;
 
     emit_progress(
-        &app,
-        start_time,
+            &app,
+            &job_id,
+            start_time,
         "stt",
         &format!("Đang nhận dạng âm thanh với Whisper ({})...", config.whisper_model),
         18.0,
@@ -257,6 +297,7 @@ pub async fn start_pipeline(
     let transcriber = LocalWhisperTranscriber::new(model_path, None, true);
     let app_stt = app.clone();
     let model_name = config.whisper_model.clone();
+    let job_id_stt = job_id.clone();
 
     // Spawn smooth progress ticker during transcription
     let (ticker_stop_tx, mut ticker_stop_rx) = tokio::sync::oneshot::channel::<()>();
@@ -271,6 +312,7 @@ pub async fn start_pipeline(
                     }
                     emit_progress(
                         &app_stt,
+                        &job_id_stt,
                         start_time,
                         "stt",
                         &format!("Đang nhận dạng âm thanh với Whisper ({})...", model_name),
@@ -305,8 +347,9 @@ pub async fn start_pipeline(
     }
 
     emit_progress(
-        &app,
-        start_time,
+            &app,
+            &job_id,
+            start_time,
         "stt",
         &format!("Nhận dạng hoàn tất: tìm thấy {} đoạn thoại.", segments.len()),
         60.0,
@@ -318,6 +361,7 @@ pub async fn start_pipeline(
     if !config.skip_translate {
         emit_progress(
             &app,
+            &job_id,
             start_time,
             "translate",
             &format!("Bắt đầu dịch {} đoạn phụ đề sang {}...", segments.len(), config.target_lang),
@@ -341,11 +385,13 @@ pub async fn start_pipeline(
         let target_lang = config.target_lang.clone();
         let app_translate = app.clone();
         let target_lang_cb = target_lang.clone();
+        let job_id_translate = job_id.clone();
 
         let on_progress = move |done: usize, total: usize| {
             let pct = 60.0 + ((done as f64 / total as f64) * 38.0);
             emit_progress(
                 &app_translate,
+                &job_id_translate,
                 start_time,
                 "translate",
                 &format!("Đang dịch {}/{} đoạn phụ đề sang {}...", done, total, target_lang_cb),
@@ -375,8 +421,9 @@ pub async fn start_pipeline(
     }
 
     emit_progress(
-        &app,
-        start_time,
+            &app,
+            &job_id,
+            start_time,
         "ready",
         &format!("Hoàn tất! Đã tạo {} đoạn phụ đề.", segments.len()),
         100.0,
@@ -541,6 +588,36 @@ pub async fn pick_video_file() -> Result<Option<String>, String> {
         .await;
 
     Ok(file.map(|f| f.path().to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+pub async fn pick_video_files() -> Result<Vec<String>, String> {
+    let files = rfd::AsyncFileDialog::new()
+        .add_filter(
+            "Video & Audio",
+            &["mp4", "mkv", "avi", "mov", "flv", "wmv", "webm", "mp3", "wav", "m4a", "flac", "ogg"],
+        )
+        .set_title("Chọn các tệp Video / Audio")
+        .pick_files()
+        .await;
+
+    Ok(files
+        .map(|fs| {
+            fs.iter()
+                .map(|f| f.path().to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn get_output_dir() -> Result<String, String> {
+    let dir = dirs::home_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("Echo Studio")
+        .join("outputs");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.to_string_lossy().to_string())
 }
 
 #[tauri::command]

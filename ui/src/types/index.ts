@@ -20,6 +20,7 @@ export interface SystemInfo {
 }
 
 export interface PipelineConfig {
+  job_id?: string;
   video_path: string;
   subtitle_path?: string | null;
   whisper_model: string;
@@ -51,10 +52,23 @@ export interface PipelineStageEvent {
 }
 
 export interface PipelineProgressEvent {
+  job_id?: string;
   stage: 'extract_audio' | 'stt' | 'translate' | 'ready';
   message: string;
   percentage: number;
   current_step?: number;
   total_steps?: number;
   elapsed_secs: number;
+}
+
+export type JobStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled';
+
+export interface BatchJob {
+  id: string;
+  videoPath: string;
+  status: JobStatus;
+  progress: PipelineProgressEvent | null;
+  segments: SubtitleSegment[];
+  outputVideoPath: string | null;
+  error: string | null;
 }

@@ -8,6 +8,7 @@ import {
   FastForward,
   Rewind,
   Repeat,
+  Film,
 } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { isTauri } from '../lib/ipc';
@@ -16,6 +17,7 @@ import { SubtitleOverlay } from './SubtitleOverlay';
 
 interface VideoPlayerProps {
   videoPath: string;
+  outputPath?: string | null;
   segments: SubtitleSegment[];
   preset: StylePreset;
   isBilingual: boolean;
@@ -34,6 +36,7 @@ function formatTime(ms: number): string {
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   videoPath,
+  outputPath,
   segments,
   preset,
   isBilingual,
@@ -49,19 +52,34 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [durationMs, setDurationMs] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [showOutput, setShowOutput] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Auto-switch to the exported output once a new export finishes
+  useEffect(() => {
+    if (outputPath) setShowOutput(true);
+  }, [outputPath]);
+
+  const activePath = showOutput && outputPath ? outputPath : videoPath;
+  const outputFileName = outputPath ? outputPath.split(/[\\/]/).pop() : null;
 
   // Convert local filesystem path to Tauri Asset URL safely
   const videoSrc = React.useMemo(() => {
-    if (!videoPath) return '';
+    if (!activePath) return '';
     if (isTauri()) {
       try {
-        return convertFileSrc(videoPath);
+        return convertFileSrc(activePath);
       } catch {
-        return videoPath;
+        return activePath;
       }
     }
-    return videoPath;
-  }, [videoPath]);
+    return activePath;
+  }, [activePath]);
+
+  // Reset error state whenever the effective source changes
+  useEffect(() => {
+    setLoadError(null);
+  }, [videoSrc]);
 
   // Handle external seek request (e.g. from clicking a subtitle row)
   useEffect(() => {
@@ -155,12 +173,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       <div className="relative flex-1 flex items-center justify-center overflow-hidden bg-black group">
         {videoSrc ? (
           <video
+            key={videoSrc}
             ref={videoRef}
             src={videoSrc}
+            preload="auto"
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
             onPlay={() => setIsPlaying(true)}
             onPause={() => setIsPlaying(false)}
+            onError={() => {
+              const err = videoRef.current?.error;
+              setLoadError(
+                err
+                  ? `Không phát được video (mã lỗi ${err.code}). Có thể thiếu codec GStreamer cho định dạng này.`
+                  : 'Không phát được video.'
+              );
+            }}
             onClick={togglePlay}
             className="w-full h-full object-contain cursor-pointer"
           />
@@ -171,13 +199,55 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </div>
         )}
 
-        {/* Real-time Subtitle Overlay */}
-        <SubtitleOverlay
-          currentTimeMs={currentTimeMs}
-          segments={segments}
-          preset={preset}
-          isBilingual={isBilingual}
-        />
+        {/* Video load error banner */}
+        {loadError && (
+          <div className="absolute inset-x-0 top-0 z-10 bg-rose-950/90 border-b border-rose-800 px-4 py-2 text-[11px] text-rose-300 text-center">
+            {loadError}
+          </div>
+        )}
+
+        {/* Real-time Subtitle Overlay (hidden on exported output: subs already burned/embedded) */}
+        {!showOutput && (
+          <SubtitleOverlay
+            currentTimeMs={currentTimeMs}
+            segments={segments}
+            preset={preset}
+            isBilingual={isBilingual}
+          />
+        )}
+
+        {/* Source / Output toggle + output path badge */}
+        {outputPath && (
+          <div className="absolute top-2 left-2 right-2 flex items-center justify-between gap-2 pointer-events-none">
+            <div className="flex items-center bg-slate-900/85 border border-slate-700/70 rounded-full p-0.5 text-[11px] pointer-events-auto">
+              <button
+                onClick={() => setShowOutput(false)}
+                className={`px-2.5 py-1 rounded-full transition ${
+                  !showOutput ? 'bg-blue-600 text-white font-semibold' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Gốc
+              </button>
+              <button
+                onClick={() => setShowOutput(true)}
+                className={`px-2.5 py-1 rounded-full transition ${
+                  showOutput ? 'bg-emerald-600 text-white font-semibold' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Kết quả
+              </button>
+            </div>
+            {showOutput && (
+              <div
+                className="flex items-center gap-1.5 bg-emerald-950/85 border border-emerald-800/60 text-emerald-300 px-2.5 py-1 rounded-full text-[10px] font-mono truncate max-w-[60%]"
+                title={outputPath}
+              >
+                <Film className="w-3 h-3 shrink-0" />
+                <span className="truncate">{outputFileName}</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Control Bar */}

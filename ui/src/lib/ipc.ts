@@ -48,8 +48,11 @@ export async function downloadWhisperModel(modelName: string): Promise<void> {
 export async function startPipeline(config: PipelineConfig): Promise<SubtitleSegment[]> {
   if (!isTauri()) {
     console.info('[Echo Studio] Simulating pipeline processing in browser mode');
+    const jobId = config.job_id;
     const emitSimulated = (event: PipelineProgressEvent) => {
-      window.dispatchEvent(new CustomEvent('echo:pipeline-progress', { detail: event }));
+      window.dispatchEvent(
+        new CustomEvent('echo:pipeline-progress', { detail: { job_id: jobId, ...event } })
+      );
     };
 
     emitSimulated({ stage: 'extract_audio', message: 'Đang trích xuất audio...', percentage: 5, elapsed_secs: 0 });
@@ -105,12 +108,12 @@ export async function listenPipelineProgress(
   }
 }
 
-export async function cancelPipeline(): Promise<void> {
+export async function cancelPipeline(jobId?: string): Promise<void> {
   if (!isTauri()) {
     console.info('[Echo Studio] Pipeline cancelled (browser mode)');
     return;
   }
-  return await invoke('cancel_pipeline');
+  return await invoke('cancel_pipeline', { jobId });
 }
 
 export async function exportSubtitles(request: ExportRequest): Promise<string> {
@@ -135,6 +138,20 @@ export async function pickVideoFile(): Promise<string | null> {
     return null;
   }
   return await invoke<string | null>('pick_video_file');
+}
+
+export async function pickVideoFiles(): Promise<string[]> {
+  if (!isTauri()) {
+    return [];
+  }
+  return await invoke<string[]>('pick_video_files');
+}
+
+export async function getOutputDir(): Promise<string> {
+  if (!isTauri()) {
+    return '/mock/Echo Studio/outputs';
+  }
+  return await invoke<string>('get_output_dir');
 }
 
 export async function pickSaveFile(defaultName: string, extension: string): Promise<string | null> {
