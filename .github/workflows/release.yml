@@ -1,19 +1,47 @@
-name: Release
+name: Tag & Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to build (e.g. v0.1.0-build.1)"
-        required: true
+        description: "Existing tag to build (leave empty to create a new one)"
+        required: false
 
 permissions:
   contents: write
 
 jobs:
+  tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.out.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute tag
+        id: out
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
+            TAG="v${VERSION}-build.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Tag: $TAG"
+
+      - name: Push tag
+        if: github.event.inputs.tag == ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.out.outputs.tag }}"
+          git push origin "${{ steps.out.outputs.tag }}"
+
   build:
+    needs: tag
     strategy:
       fail-fast: false
       matrix:
@@ -32,7 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref_name }}
+          ref: ${{ needs.tag.outputs.tag }}
 
       - uses: actions/setup-node@v4
         with:
@@ -68,8 +96,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.event.inputs.tag || github.ref_name }}
-          releaseName: "Echo Studio ${{ github.event.inputs.tag || github.ref_name }}"
+          tagName: ${{ needs.tag.outputs.tag }}
+          releaseName: "Echo Studio ${{ needs.tag.outputs.tag }}"
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
