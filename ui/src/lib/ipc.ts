@@ -10,6 +10,8 @@ import type {
   ProviderProfile,
   GeneralSettings,
   ConnectionTest,
+  Skill,
+  TrySkillResult,
 } from '../types';
 
 export function isTauri(): boolean {
@@ -177,6 +179,12 @@ let mockSettings: SettingsView = {
     style_preset: 'youtube_yellow',
     use_cloud_stt: false,
   },
+  presets: [
+    { id: 'builtin:math', name: 'Toán học', description: 'Mock preset', system_prompt: 'Math {target_lang}', glossary: [] },
+    { id: 'builtin:ai-ml', name: 'AI / Machine Learning', description: 'Mock preset', system_prompt: 'ML {target_lang}', glossary: [] },
+  ],
+  skills: [],
+  default_skill_id: null,
   stt_has_key: false,
   secrets_backend: 'keyring',
   load_warning: null,
@@ -250,4 +258,66 @@ export async function testProfile(profile: ProviderProfile, apiKey: string | nul
 export async function listProfileModels(profile: ProviderProfile, apiKey: string | null): Promise<string[]> {
   if (!isTauri()) return ['qwen2.5:7b', 'llama3:8b'];
   return await invoke<string[]>('list_profile_models', { profile, apiKey });
+}
+
+export async function saveSkill(skill: Skill): Promise<SettingsView> {
+  if (!isTauri()) {
+    const id = skill.id || `mock-skill-${Date.now()}`;
+    const next = { ...skill, id };
+    mockSettings.skills = mockSettings.skills.some((s) => s.id === id)
+      ? mockSettings.skills.map((s) => (s.id === id ? next : s))
+      : [...mockSettings.skills, next];
+    return cloneMock();
+  }
+  return await invoke<SettingsView>('save_skill', { skill });
+}
+
+export async function deleteSkill(id: string): Promise<SettingsView> {
+  if (!isTauri()) {
+    mockSettings.skills = mockSettings.skills.filter((s) => s.id !== id);
+    if (mockSettings.default_skill_id === id) mockSettings.default_skill_id = null;
+    return cloneMock();
+  }
+  return await invoke<SettingsView>('delete_skill', { id });
+}
+
+export async function duplicateSkill(id: string): Promise<SettingsView> {
+  if (!isTauri()) {
+    const src = [...mockSettings.presets, ...mockSettings.skills].find((s) => s.id === id);
+    if (src) mockSettings.skills.push({ ...src, id: `mock-skill-${Date.now()}`, name: `${src.name} (bản sao)` });
+    return cloneMock();
+  }
+  return await invoke<SettingsView>('duplicate_skill', { id });
+}
+
+export async function setDefaultSkill(id: string | null): Promise<SettingsView> {
+  if (!isTauri()) {
+    mockSettings.default_skill_id = id;
+    return cloneMock();
+  }
+  return await invoke<SettingsView>('set_default_skill', { id });
+}
+
+export async function importSkill(): Promise<SettingsView> {
+  if (!isTauri()) return cloneMock();
+  return await invoke<SettingsView>('import_skill');
+}
+
+export async function exportSkill(id: string): Promise<string | null> {
+  if (!isTauri()) return `/mock/${id}.echo-skill.json`;
+  return await invoke<string | null>('export_skill', { id });
+}
+
+export async function trySkill(
+  skill: Skill,
+  profileId: string | null,
+  sample: string,
+  sourceLang: string,
+  targetLang: string
+): Promise<TrySkillResult> {
+  if (!isTauri()) {
+    const lines = sample.split('\n').map((l) => l.trim()).filter(Boolean);
+    return { lines: lines.map((l) => `[mock] ${l}`), system_prompt: skill.system_prompt, error: null };
+  }
+  return await invoke<TrySkillResult>('try_skill', { skill, profileId, sample, sourceLang, targetLang });
 }

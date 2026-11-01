@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { getSystemInfo, listenPipelineProgress, getSettings, saveProfile, testProfile, listProfileModels, saveGeneral } from './ipc';
+import { getSystemInfo, listenPipelineProgress, getSettings, saveProfile, testProfile, listProfileModels, saveGeneral, saveSkill, setDefaultSkill, trySkill, duplicateSkill } from './ipc';
 import { defaultBaseUrl, requiresBaseUrl, requiresApiKey, emptyProfile, KIND_LABELS } from './providers';
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -80,5 +80,25 @@ describe('provider helpers', () => {
     expect(requiresApiKey('ollama')).toBe(false);
     expect(KIND_LABELS.anthropic).toBe('Anthropic');
     expect(emptyProfile()).toEqual({ id: '', name: '', kind: 'openai', base_url: null, model: '' });
+  });
+});
+
+describe('skill IPC', () => {
+  it('uses the agreed command names and camelCase args', async () => {
+    const skill = { id: '', name: 'X', description: '', system_prompt: 'p', glossary: [] };
+    await saveSkill(skill);
+    expect(invoke).toHaveBeenCalledWith('save_skill', { skill });
+    await setDefaultSkill(null);
+    expect(invoke).toHaveBeenCalledWith('set_default_skill', { id: null });
+    await duplicateSkill('builtin:math');
+    expect(invoke).toHaveBeenCalledWith('duplicate_skill', { id: 'builtin:math' });
+    await trySkill(skill, null, 'Hello', 'auto', 'vi');
+    expect(invoke).toHaveBeenCalledWith('try_skill', {
+      skill,
+      profileId: null,
+      sample: 'Hello',
+      sourceLang: 'auto',
+      targetLang: 'vi',
+    });
   });
 });
