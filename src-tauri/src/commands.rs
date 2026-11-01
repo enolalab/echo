@@ -10,9 +10,10 @@ use auto_subtitle::stt::Transcriber;
 use auto_subtitle::subtitle::ass::escape_ass_text;
 use auto_subtitle::subtitle::model::{sanitize_segments, SubtitleSegment};
 use auto_subtitle::subtitle::srt::render_srt;
-use auto_subtitle::translate::ollama::OllamaTranslator;
-use auto_subtitle::translate::openai_compat::OpenAiCompatTranslator;
-use auto_subtitle::translate::Translator;
+use auto_subtitle::llm::build_chat_client;
+use auto_subtitle::settings::SettingsStore;
+use auto_subtitle::stt::whisper_api::ApiTranscriber;
+use auto_subtitle::translate::{LlmTranslator, Translator};
 
 use crate::state::AppState;
 use crate::types::{
@@ -199,7 +200,7 @@ pub async fn start_pipeline(
         senders.insert(job_id.clone(), cancel_tx);
     }
 
-    let result = run_pipeline(app, config, job_id.clone(), cancel_rx).await;
+    let result = run_pipeline(app, state.settings.clone(), config, job_id.clone(), cancel_rx).await;
 
     {
         let mut senders = state.cancel_senders.lock().await;
@@ -211,6 +212,7 @@ pub async fn start_pipeline(
 
 async fn run_pipeline(
     app: AppHandle,
+    settings: std::sync::Arc<std::sync::Mutex<SettingsStore>>,
     config: PipelineConfig,
     job_id: String,
     mut cancel_rx: broadcast::Receiver<()>,
@@ -220,6 +222,32 @@ async fn run_pipeline(
     if !input_video.is_file() {
         return Err(format!("Không tìm thấy file video: {}", input_video.display()));
     }
+
+    let (translator, stt_key): (Option<Box<dyn Translator>>, Option<String>) = {
+        let store = settings.lock().map_err(|_| "Lỗi khóa cài đặt".to_string())?;
+        let translator = if config.skip_translate {
+            None
+        } else {
+            let profile = store
+                .resolve_profile(config.profile_id.as_deref())
+                .map_err(|e| format!("{e:#}"))?
+                .ok_or_else(|| "Chưa cấu hình provider dịch".to_string())?;
+            let key = store.profile_key(&profile.id).map_err(|e| format!("{e:#}"))?;
+            let client = build_chat_client(&profile, key).map_err(|e| e.user_message())?;
+            Some(Box::new(LlmTranslator::new(client, None)) as Box<dyn Translator>)
+        };
+        let stt_key = if config.use_cloud_stt {
+            Some(
+                store
+                    .stt_key()
+                    .map_err(|e| format!("{e:#}"))?
+                    .ok_or_else(|| "Chưa nhập API key Whisper".to_string())?,
+            )
+        } else {
+            None
+        };
+        (translator, stt_key)
+    };
 
     let app_config = get_app_config();
     let dm = DependencyManager::new(app_config);
@@ -242,9 +270,17 @@ async fn run_pipeline(
         None,
     );
     let temp_dir = tempfile::tempdir().map_err(|e| e.to_string())?;
-    let wav_path = temp_dir.path().join("audio_16k.wav");
+    let audio_path = if stt_key.is_some() {
+        temp_dir.path().join("audio.mp3")
+    } else {
+        temp_dir.path().join("audio_16k.wav")
+    };
 
-    let extract_cmd = media::build_extract_wav_command(&ffmpeg, &input_video, &wav_path);
+    let extract_cmd = if stt_key.is_some() {
+        media::build_extract_mp3_command(&ffmpeg, &input_video, &audio_path)
+    } else {
+        media::build_extract_wav_command(&ffmpeg, &input_video, &audio_path)
+    };
     let extract_res = tokio::select! {
         res = tokio::task::spawn_blocking(move || run_ffmpeg(extract_cmd, "extract wav")) => Some(res),
         _ = cancel_rx.recv() => None,
@@ -278,25 +314,41 @@ async fn run_pipeline(
         None,
     );
 
-    let model_path = dm
-        .ensure_whisper_model(&config.whisper_model)
-        .await
-        .map_err(|e| format!("Lỗi tải model Whisper: {e:#}"))?;
+    let stt_label = if stt_key.is_some() {
+        "Whisper API".to_string()
+    } else {
+        format!("Whisper ({})", config.whisper_model)
+    };
+
+    let transcriber: Box<dyn Transcriber> = match stt_key {
+        Some(key) => Box::new(ApiTranscriber::new(
+            key,
+            "https://api.openai.com/v1".to_string(),
+            "whisper-1".to_string(),
+            None,
+        )),
+        None => {
+            let model_path = dm
+                .ensure_whisper_model(&config.whisper_model)
+                .await
+                .map_err(|e| format!("Lỗi tải model Whisper: {e:#}"))?;
+            Box::new(LocalWhisperTranscriber::new(model_path, None, true))
+        }
+    };
 
     emit_progress(
             &app,
             &job_id,
             start_time,
         "stt",
-        &format!("Đang nhận dạng âm thanh với Whisper ({})...", config.whisper_model),
+        &format!("Đang nhận dạng âm thanh với {stt_label}..."),
         18.0,
         None,
         None,
     );
 
-    let transcriber = LocalWhisperTranscriber::new(model_path, None, true);
     let app_stt = app.clone();
-    let model_name = config.whisper_model.clone();
+    let model_name = stt_label.clone();
     let job_id_stt = job_id.clone();
 
     // Spawn smooth progress ticker during transcription
@@ -315,7 +367,7 @@ async fn run_pipeline(
                         &job_id_stt,
                         start_time,
                         "stt",
-                        &format!("Đang nhận dạng âm thanh với Whisper ({})...", model_name),
+                        &format!("Đang nhận dạng âm thanh với {}...", model_name),
                         current_pct,
                         None,
                         None,
@@ -329,7 +381,7 @@ async fn run_pipeline(
     });
 
     let transcribe_res = tokio::select! {
-        res = transcriber.transcribe(&wav_path) => Some(res),
+        res = transcriber.transcribe(&audio_path) => Some(res),
         _ = cancel_rx.recv() => None,
     };
     let _ = ticker_stop_tx.send(());
@@ -370,16 +422,7 @@ async fn run_pipeline(
             Some(segments.len()),
         );
 
-        let translator: Box<dyn Translator> = if config.use_cloud_llm {
-            let api_key = config.llm_api_key.unwrap_or_default();
-            let base_url = config.llm_api_base.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-            Box::new(OpenAiCompatTranslator::new(base_url, api_key, config.llm_model.clone()))
-        } else {
-            Box::new(OllamaTranslator::new(
-                "http://localhost:11434".to_string(),
-                config.llm_model.clone(),
-            ))
-        };
+        let translator = translator.expect("translator resolved when translation enabled");
 
         let mut segments_to_translate = segments.clone();
         let target_lang = config.target_lang.clone();

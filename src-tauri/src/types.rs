@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use auto_subtitle::settings::{GeneralSettings, ProviderProfile, SecretsBackend};
 use auto_subtitle::subtitle::SubtitleSegment;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -24,13 +25,10 @@ pub struct PipelineConfig {
     pub subtitle_path: Option<String>,
     pub whisper_model: String,
     pub use_cloud_stt: bool,
-    pub stt_api_key: Option<String>,
     pub target_lang: String,
     pub skip_translate: bool,
-    pub use_cloud_llm: bool,
-    pub llm_model: String,
-    pub llm_api_base: Option<String>,
-    pub llm_api_key: Option<String>,
+    #[serde(default)]
+    pub profile_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -70,6 +68,23 @@ pub struct PipelineProgressEvent {
     pub current_step: Option<usize>,
     pub total_steps: Option<usize>,
     pub elapsed_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ProfileView {
+    #[serde(flatten)]
+    pub profile: ProviderProfile,
+    pub has_key: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SettingsView {
+    pub profiles: Vec<ProfileView>,
+    pub default_profile_id: Option<String>,
+    pub general: GeneralSettings,
+    pub stt_has_key: bool,
+    pub secrets_backend: SecretsBackend,
+    pub load_warning: Option<String>,
 }
 
 #[cfg(test)]

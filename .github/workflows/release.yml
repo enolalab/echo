@@ -79,7 +79,8 @@ jobs:
             patchelf \
             cmake \
             libasound2-dev \
-            libssl-dev
+            libssl-dev \
+            libdbus-1-dev
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
