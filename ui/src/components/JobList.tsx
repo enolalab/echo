@@ -9,11 +9,16 @@ interface JobListProps {
   onRemove: (id: string) => void;
   onCancelJob: (id: string) => void;
   onOpenFolder: (path: string) => void;
+  skillOptions: { id: string; name: string }[];
+  defaultSkillName: string | null;
+  onChangeJobSkill: (jobId: string, skillId: string | undefined) => void;
 }
 
 function fileName(path: string): string {
   return path.split(/[/\\]/).pop() || path;
 }
+
+const EDITABLE: BatchJob['status'][] = ['queued', 'error', 'cancelled'];
 
 const STATUS_LABEL: Record<BatchJob['status'], string> = {
   queued: 'Chờ xử lý',
@@ -70,6 +75,9 @@ export const JobList: React.FC<JobListProps> = ({
   onRemove,
   onCancelJob,
   onOpenFolder,
+  skillOptions,
+  defaultSkillName,
+  onChangeJobSkill,
 }) => {
   if (jobs.length === 0) {
     return (
@@ -128,6 +136,24 @@ export const JobList: React.FC<JobListProps> = ({
                 </button>
               )}
             </div>
+
+            {EDITABLE.includes(job.status) ? (
+              <select
+                aria-label="Skill cho file"
+                value={job.skillId ?? ''}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => onChangeJobSkill(job.id, e.target.value === '' ? undefined : e.target.value)}
+                className="self-start bg-slate-900/70 border border-slate-700 rounded px-1.5 py-0.5 text-[10px] text-slate-300 focus:outline-none"
+              >
+                <option value="">Mặc định ({defaultSkillName ?? 'không dùng'})</option>
+                <option value="none">Không dùng skill</option>
+                {skillOptions.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            ) : (
+              job.skillUsed && <span className="text-slate-500 text-[10px]">🎓 {job.skillUsed}</span>
+            )}
 
             {/* Progress bar for running job */}
             {job.status === 'running' && (

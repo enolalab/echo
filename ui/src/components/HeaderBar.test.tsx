@@ -15,6 +15,10 @@ describe('HeaderBar', () => {
         defaultProfileId={null}
         onSelectProfile={vi.fn()}
         onOpenSettings={vi.fn()}
+        presets={[]}
+        userSkills={[]}
+        defaultSkillId={null}
+        onSelectSkill={vi.fn()}
         targetLang="vi"
         onSelectTargetLang={vi.fn()}
         bilingual={true}
@@ -44,6 +48,10 @@ describe('HeaderBar', () => {
         defaultProfileId={null}
         onSelectProfile={vi.fn()}
         onOpenSettings={vi.fn()}
+        presets={[]}
+        userSkills={[]}
+        defaultSkillId={null}
+        onSelectSkill={vi.fn()}
         targetLang="vi"
         onSelectTargetLang={vi.fn()}
         bilingual={true}
@@ -79,6 +87,10 @@ describe('HeaderBar', () => {
         defaultProfileId="o"
         onSelectProfile={onSelectProfile}
         onOpenSettings={onOpenSettings}
+        presets={[]}
+        userSkills={[]}
+        defaultSkillId={null}
+        onSelectSkill={vi.fn()}
         targetLang="vi"
         onSelectTargetLang={vi.fn()}
         bilingual={true}
@@ -100,5 +112,44 @@ describe('HeaderBar', () => {
     expect(onSelectProfile).toHaveBeenCalledWith('d');
     fireEvent.click(screen.getByRole('button', { name: 'Cài đặt' }));
     expect(onOpenSettings).toHaveBeenCalled();
+  });
+
+  it('skill select lists none, presets and user skills', () => {
+    const onSelectSkill = vi.fn();
+    render(
+      <HeaderBar
+        videoPath=""
+        onSelectVideo={vi.fn()}
+        whisperModel="base"
+        onSelectWhisperModel={vi.fn()}
+        profiles={[]}
+        defaultProfileId={null}
+        onSelectProfile={vi.fn()}
+        onOpenSettings={vi.fn()}
+        presets={[{ id: 'builtin:math', name: 'Toán học', description: '', system_prompt: 'p', glossary: [] }]}
+        userSkills={[{ id: 'u1', name: 'Của tôi', description: '', system_prompt: 'p', glossary: [] }]}
+        defaultSkillId={null}
+        onSelectSkill={onSelectSkill}
+        targetLang="vi"
+        onSelectTargetLang={vi.fn()}
+        bilingual={true}
+        onToggleBilingual={vi.fn()}
+        stylePreset="youtube_yellow"
+        onSelectPreset={vi.fn()}
+        isRunning={false}
+        onStart={vi.fn()}
+        onCancel={vi.fn()}
+        systemInfo={null}
+        onDownloadModel={vi.fn()}
+        downloadingModel={null}
+      />
+    );
+    const select = screen.getByLabelText('Skill') as HTMLSelectElement;
+    expect(select.value).toBe('none');
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(['none', 'builtin:math', 'u1']);
+    fireEvent.change(select, { target: { value: 'u1' } });
+    expect(onSelectSkill).toHaveBeenCalledWith('u1');
+    fireEvent.change(select, { target: { value: 'none' } });
+    expect(onSelectSkill).toHaveBeenCalledWith(null);
   });
 });

@@ -17,6 +17,9 @@ const { loaded, saveGeneral } = vi.hoisted(() => {
       style_preset: 'netflix_modern',
       use_cloud_stt: false,
     },
+    presets: [{ id: 'builtin:math', name: 'Toán học', description: '', system_prompt: 'p', glossary: [] }],
+    skills: [],
+    default_skill_id: 'builtin:math',
     stt_has_key: false,
     secrets_backend: 'keyring',
     load_warning: 'File cài đặt bị hỏng',
@@ -43,6 +46,7 @@ vi.mock('./lib/ipc', async (importOriginal) => {
     getSettings: vi.fn().mockResolvedValue(loaded),
     saveGeneral: (...args: unknown[]) => saveGeneral(...args),
     setDefaultProfile: vi.fn().mockResolvedValue(loaded),
+    setDefaultSkill: vi.fn().mockResolvedValue(loaded),
   };
 });
 
@@ -70,5 +74,12 @@ describe('App settings persistence', () => {
       { timeout: 2000 }
     );
     expect(saveGeneral).toHaveBeenCalledTimes(1);
+  });
+
+  it('header shows default skill from settings', async () => {
+    render(<App />);
+    await waitFor(() =>
+      expect((screen.getByLabelText('Skill') as HTMLSelectElement).value).toBe('builtin:math')
+    );
   });
 });

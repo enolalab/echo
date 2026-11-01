@@ -19,6 +19,12 @@ const handlers = {
   onRemove: vi.fn(),
   onCancelJob: vi.fn(),
   onOpenFolder: vi.fn(),
+  skillOptions: [
+    { id: 'builtin:math', name: 'Toán học' },
+    { id: 'u1', name: 'Của tôi' },
+  ],
+  defaultSkillName: 'Toán học',
+  onChangeJobSkill: vi.fn(),
 };
 
 describe('JobList', () => {
@@ -72,5 +78,24 @@ describe('JobList', () => {
 
     fireEvent.click(screen.getByTitle('Hủy file này'));
     expect(handlers.onCancelJob).toHaveBeenCalledWith('job-1');
+  });
+
+  it('per-job skill select only for editable statuses', () => {
+    const jobs: BatchJob[] = [
+      baseJob,
+      { ...baseJob, id: 'job-2', videoPath: '/v/run.mp4', status: 'running', skillUsed: 'Của tôi' },
+      { ...baseJob, id: 'job-3', videoPath: '/v/err.mp4', status: 'error', skillId: 'none' },
+    ];
+    render(<JobList jobs={jobs} selectedJobId={null} {...handlers} />);
+    const selects = screen.getAllByLabelText('Skill cho file') as HTMLSelectElement[];
+    expect(selects).toHaveLength(2);
+    expect(selects[0].value).toBe('');
+    expect(selects[0].options[0].text).toBe('Mặc định (Toán học)');
+    expect(selects[1].value).toBe('none');
+    fireEvent.change(selects[0], { target: { value: 'u1' } });
+    expect(handlers.onChangeJobSkill).toHaveBeenCalledWith('job-1', 'u1');
+    fireEvent.change(selects[1], { target: { value: '' } });
+    expect(handlers.onChangeJobSkill).toHaveBeenCalledWith('job-3', undefined);
+    expect(screen.getByText('🎓 Của tôi')).toBeDefined();
   });
 });

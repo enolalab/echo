@@ -18,9 +18,11 @@ import {
   getSettings,
   saveGeneral,
   setDefaultProfile,
+  setDefaultSkill,
   listenPipelineProgress,
   isTauri,
 } from './lib/ipc';
+import { allSkills, jobSkillChoice, skillName } from './lib/skills';
 import type {
   SubtitleSegment,
   GeneralSettings,
@@ -44,6 +46,8 @@ export default function App() {
     use_cloud_stt: false,
   });
   const [settingsView, setSettingsView] = useState<SettingsView | null>(null);
+  const settingsRef = useRef<SettingsView | null>(null);
+  settingsRef.current = settingsView;
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const lastSavedGeneral = useRef<string | null>(null);
   const patchGeneral = (patch: Partial<GeneralSettings>) => setGeneral((g) => ({ ...g, ...patch }));
@@ -113,6 +117,16 @@ export default function App() {
       setLogs((prev) => [...prev, `[LỖI] ${String(err)}`]);
     }
   };
+
+  const handleSelectSkill = async (id: string | null) => {
+    try {
+      setSettingsView(await setDefaultSkill(id));
+    } catch (err) {
+      setLogs((prev) => [...prev, `[LỖI] ${String(err)}`]);
+    }
+  };
+
+  const handleChangeJobSkill = (jobId: string, skillId: string | undefined) => updateJob(jobId, { skillId });
 
   // Setup pipeline progress listener — routes progress to the right job
   useEffect(() => {
@@ -212,8 +226,11 @@ export default function App() {
   };
 
   const runJob = async (job: BatchJob) => {
+    const current = jobsRef.current.find((j) => j.id === job.id) ?? job;
+    const { skill_id, label } = jobSkillChoice(current, settingsRef.current);
     updateJob(job.id, {
       status: 'running',
+      skillUsed: label,
       error: null,
       progress: {
         job_id: job.id,
@@ -232,7 +249,8 @@ export default function App() {
         use_cloud_stt: general.use_cloud_stt,
         target_lang: targetLang,
         skip_translate: false,
-        profile_id: settingsView?.default_profile_id ?? null,
+        profile_id: settingsRef.current?.default_profile_id ?? null,
+        skill_id,
       });
       updateJob(job.id, { status: 'done', segments: result });
     } catch (err) {
@@ -398,6 +416,10 @@ export default function App() {
         defaultProfileId={settingsView?.default_profile_id ?? null}
         onSelectProfile={handleSelectProfile}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        presets={settingsView?.presets ?? []}
+        userSkills={settingsView?.skills ?? []}
+        defaultSkillId={settingsView?.default_skill_id ?? null}
+        onSelectSkill={handleSelectSkill}
         targetLang={targetLang}
         onSelectTargetLang={(l) => patchGeneral({ target_lang: l })}
         bilingual={bilingual}
@@ -443,6 +465,9 @@ export default function App() {
                 onRemove={handleRemoveJob}
                 onCancelJob={handleCancelJob}
                 onOpenFolder={openInFileManager}
+                skillOptions={settingsView ? allSkills(settingsView).map((s) => ({ id: s.id, name: s.name })) : []}
+                defaultSkillName={skillName(settingsView, settingsView?.default_skill_id)}
+                onChangeJobSkill={handleChangeJobSkill}
               />
             </div>
           </div>

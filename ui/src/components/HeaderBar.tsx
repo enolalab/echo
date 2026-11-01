@@ -10,8 +10,9 @@ import {
   Sparkles,
   Palette,
   Settings,
+  GraduationCap,
 } from 'lucide-react';
-import type { SystemInfo, StylePreset, ProfileView } from '../types';
+import type { SystemInfo, StylePreset, ProfileView, Skill } from '../types';
 import { KIND_ICONS } from '../lib/providers';
 
 interface HeaderBarProps {
@@ -24,6 +25,10 @@ interface HeaderBarProps {
   defaultProfileId: string | null;
   onSelectProfile: (id: string) => void;
   onOpenSettings: () => void;
+  presets: Skill[];
+  userSkills: Skill[];
+  defaultSkillId: string | null;
+  onSelectSkill: (id: string | null) => void;
   targetLang: string;
   onSelectTargetLang: (l: string) => void;
   bilingual: boolean;
@@ -48,6 +53,10 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   defaultProfileId,
   onSelectProfile,
   onOpenSettings,
+  presets,
+  userSkills,
+  defaultSkillId,
+  onSelectSkill,
   targetLang,
   onSelectTargetLang,
   bilingual,
@@ -175,6 +184,34 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           >
             <Settings className="w-3.5 h-3.5" />
           </button>
+        </div>
+
+        {/* Translation skill selector */}
+        <div className="flex items-center bg-slate-900/60 rounded-md border border-slate-700 px-1.5 py-0.5">
+          <GraduationCap className="w-3.5 h-3.5 text-emerald-400 mr-1.5" />
+          <select
+            aria-label="Skill"
+            value={defaultSkillId ?? 'none'}
+            onChange={(e) => onSelectSkill(e.target.value === 'none' ? null : e.target.value)}
+            disabled={isRunning}
+            className="bg-transparent text-slate-200 focus:outline-none py-1 text-xs cursor-pointer max-w-[160px] truncate"
+          >
+            <option value="none" className="bg-slate-800">Không dùng skill</option>
+            {presets.length > 0 && (
+              <optgroup label="Có sẵn" className="bg-slate-800">
+                {presets.map((s) => (
+                  <option key={s.id} value={s.id} className="bg-slate-800">🔒 {s.name}</option>
+                ))}
+              </optgroup>
+            )}
+            {userSkills.length > 0 && (
+              <optgroup label="Của tôi" className="bg-slate-800">
+                {userSkills.map((s) => (
+                  <option key={s.id} value={s.id} className="bg-slate-800">{s.name}</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
         </div>
 
         {/* Target Language */}
