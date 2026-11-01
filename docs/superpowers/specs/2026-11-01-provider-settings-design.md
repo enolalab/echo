@@ -106,10 +106,10 @@ pub fn build_chat_client(profile: &ProviderProfile, api_key: Option<String>) -> 
 ### Errors
 
 ```rust
-pub enum LlmError { Auth, NotFound, RateLimit, Timeout, Network(String), Other { status: Option<u16>, body: String } }
+pub enum LlmError { Auth, NotFound, RateLimit, Timeout(String), Network(String), Config(String), Other { status: Option<u16>, body: String } }
 ```
 
-HTTP 401/403 → `Auth`; 404 → `NotFound`; 429 → `RateLimit`; reqwest timeout → `Timeout`; connect error → `Network(host)`; anything else → `Other` with the first 200 chars of the body. `LlmError::user_message()` returns the Vietnamese text shown in the UI:
+HTTP 401/403 → `Auth`; 404 → `NotFound`; 429 → `RateLimit`; reqwest timeout → `Timeout(host)`; connect error → `Network(host)`; invalid profile (e.g. compatible kind without base URL) → `Config(msg)`; anything else → `Other` with the first 200 chars of the body (`status: None` for undecodable 2xx responses). `build_chat_client` returns `Result<Box<dyn ChatClient>, LlmError>` so `Config` can be reported. `LlmError::user_message()` returns the Vietnamese text shown in the UI:
 
 | Variant | Message |
 |---|---|
@@ -117,6 +117,7 @@ HTTP 401/403 → `Auth`; 404 → `NotFound`; 429 → `RateLimit`; reqwest timeou
 | NotFound | "Sai base URL hoặc tên model" |
 | RateLimit | "Bị giới hạn tốc độ, thử lại sau" |
 | Timeout / Network | "Không kết nối được tới {host}" |
+| Config | the message itself |
 | Other | "Lỗi provider ({status}): {body}" |
 
 ### Translator
@@ -129,7 +130,7 @@ pub struct LlmTranslator { client: Box<dyn ChatClient>, system_prompt: Option<St
 Implements the existing `Translator` trait: `build_translation_prompt` → `client.chat(system_prompt, prompt)` → `parse_translated_lines`. It does **not** retry itself; it returns the `LlmError` wrapped in `anyhow::Error` so the pipeline can inspect it.
 
 Retry lives in the existing loop in `pipeline::translate_all_with_progress` (`MAX_ATTEMPTS = 3`). Changes to that loop:
-- If the error chain contains an `LlmError` with `!is_retryable()` (`Auth`, `NotFound`, `Other` with 4xx status) → stop immediately.
+- If the error chain contains an `LlmError` with `!is_retryable()` (`Auth`, `NotFound`, `Config`, `Other` with 4xx status) → stop immediately.
 - If it is `RateLimit` or `Other` with 5xx status → sleep `2s × attempt` (2s, then 4s) before the next attempt.
 - Any other error (including non-`LlmError` errors from test doubles) → retry immediately, as today.
 
@@ -164,10 +165,10 @@ Remove `use_cloud_llm`, `llm_model`, `llm_api_base`, `llm_api_key`, `stt_api_key
 
 - **HeaderBar**: the Ollama model select becomes a **Profile** select (profile name + kind icon); add a ⚙️ button opening Settings. Changing the select calls `set_default_profile`, so the header always shows and persists the default profile (one concept, no separate "session profile").
 - **`SettingsModal`** (new component), two tabs:
-  - *Providers*: profile list (left, with "+ Thêm", default marked ★) and form (right): Kind, Name, Base URL (placeholder = kind default), API key (password input; shows "••• đã lưu" when `has_key`, empty input = keep), Model (combobox: suggestions from `list_profile_models`, fetched on open and on a ↻ button; free text always allowed). Buttons: Test kết nối (shows ✅ latency or ❌ message inline), Lưu, Xóa (confirm), Đặt mặc định.
+  - *Providers*: profile list (left, with "+ Thêm", default marked ★) and form (right): Kind, Name, Base URL (placeholder = kind default), API key (password input; shows "••• đã lưu" when `has_key`, empty input = keep; a "Xóa key" link shown when `has_key` saves with `Some("")`), Model (combobox: suggestions from `list_profile_models`, fetched on open and on a ↻ button; free text always allowed). Buttons: Test kết nối (shows ✅ latency or ❌ message inline), Lưu, Xóa (confirm), Đặt mặc định.
   - *Chung*: Whisper model, STT cloud toggle + Whisper API key field, target language, bilingual, style preset.
 - **Keychain warning banner** inside Settings when `secrets_backend == "file"`: "Không tìm thấy keychain hệ thống — API key đang lưu dạng file".
-- **Load warning**: if `load_warning` is set, show it once as a toast.
+- **Load warning**: if `load_warning` is set, append it to the existing log panel (`logs` in `App.tsx`, prefixed `[CẢNH BÁO]`). No toast system is added.
 - **Persistence**: `App.tsx` loads settings on mount and replaces its local `useState` defaults. Changing whisper model, target language, bilingual, or style preset from the header calls `save_general`, debounced 500ms.
 - `lib/ipc.ts` gets typed wrappers plus browser-mode mocks for every new command (matching the existing mock pattern).
 
