@@ -87,7 +87,7 @@ fn run_whisper(
         .map(|i| {
             let t0 = state.full_get_segment_t0(i).context("get segment start")?;
             let t1 = state.full_get_segment_t1(i).context("get segment end")?;
-            let text = state.full_get_segment_text(i).context("get segment text")?;
+            let text = state.full_get_segment_text_lossy(i).context("get segment text")?;
             Ok((t0, t1, text))
         })
         .collect()
