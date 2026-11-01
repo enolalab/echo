@@ -84,6 +84,14 @@ pub struct Cli {
     #[arg(long)]
     pub list_profiles: bool,
 
+    /// Translation skill name or id, or "none"
+    #[arg(long)]
+    pub skill: Option<String>,
+
+    /// Print available translation skills and exit
+    #[arg(long)]
+    pub list_skills: bool,
+
     #[arg(long)]
     pub keep_temp: bool,
 }
@@ -123,5 +131,18 @@ pub fn choose_translator(cli: &Cli, settings: Option<&Settings>) -> anyhow::Resu
             .map(TranslatorChoice::Profile)
             .unwrap_or(TranslatorChoice::Legacy(TranslateEngine::Ollama))),
         (None, None) => Ok(TranslatorChoice::Legacy(TranslateEngine::Ollama)),
+    }
+}
+
+use crate::settings::SettingsStore;
+use crate::skills::{Skill, NO_SKILL};
+
+pub fn choose_skill(cli: &Cli, store: Option<&SettingsStore>) -> anyhow::Result<Option<Skill>> {
+    match (cli.skill.as_deref().map(str::trim), store) {
+        (Some(q), _) if q == NO_SKILL => Ok(None),
+        (Some(q), Some(s)) => s.resolve_skill(Some(q)),
+        (Some(_), None) => anyhow::bail!("Không đọc được settings.json nên không dùng được --skill"),
+        (None, Some(s)) => s.resolve_skill(None),
+        (None, None) => Ok(None),
     }
 }

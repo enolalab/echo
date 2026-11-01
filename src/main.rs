@@ -2,7 +2,7 @@ use anyhow::Context;
 use clap::Parser;
 
 use auto_subtitle::cli::{
-    choose_translator, Cli, OutputMode, SttEngine, TranslateEngine, TranslatorChoice,
+    choose_skill, choose_translator, Cli, OutputMode, SttEngine, TranslateEngine, TranslatorChoice,
     DEFAULT_API_MODEL, DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL,
 };
 use auto_subtitle::config::AppConfig;
@@ -12,6 +12,7 @@ use auto_subtitle::llm::openai::OpenAiChatClient;
 use auto_subtitle::llm::{build_chat_client, ChatClient};
 use auto_subtitle::pipeline::{self, Deps};
 use auto_subtitle::settings::{ProviderKind, SettingsStore};
+use auto_subtitle::skills::Skill;
 use auto_subtitle::stt::whisper_api::ApiTranscriber;
 use auto_subtitle::stt::whisper_local::LocalWhisperTranscriber;
 use auto_subtitle::stt::Transcriber;
@@ -30,9 +31,20 @@ fn print_profiles() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn print_skills() -> anyhow::Result<()> {
+    let store = SettingsStore::open_default()?;
+    let default = store.settings().default_skill_id.clone();
+    for s in store.skills_all() {
+        let mark = if default.as_deref() == Some(s.id.as_str()) { "default" } else { "" };
+        println!("{} | {} | {} terms | {}", s.name, s.id, s.glossary.len(), mark);
+    }
+    Ok(())
+}
+
 async fn build_translator(
     cli: &Cli,
     store: Option<&SettingsStore>,
+    skill: Option<Skill>,
 ) -> anyhow::Result<Box<dyn Translator>> {
     match choose_translator(cli, store.map(|s| s.settings()))? {
         TranslatorChoice::Legacy(TranslateEngine::Ollama) => {
@@ -40,7 +52,7 @@ async fn build_translator(
             let model = cli.ollama_model.clone().unwrap_or_else(|| DEFAULT_OLLAMA_MODEL.to_string());
             let client = OllamaChatClient::new(url.clone(), model.clone());
             ensure_ollama_model(&client, &url, &model).await?;
-            Ok(Box::new(LlmTranslator::new(Box::new(client), None)))
+            Ok(Box::new(LlmTranslator::new(Box::new(client), skill.clone())))
         }
         TranslatorChoice::Legacy(TranslateEngine::OpenaiCompat) => {
             let api_key = cli
@@ -49,7 +61,7 @@ async fn build_translator(
                 .context("--api-key or OPENAI_API_KEY required for translation")?;
             let model = cli.api_model.clone().unwrap_or_else(|| DEFAULT_API_MODEL.to_string());
             let client = OpenAiChatClient::new(cli.api_base_url_or_default(), Some(api_key), model);
-            Ok(Box::new(LlmTranslator::new(Box::new(client), None)))
+            Ok(Box::new(LlmTranslator::new(Box::new(client), skill.clone())))
         }
         TranslatorChoice::Profile(profile) => {
             let key = match store {
@@ -62,14 +74,18 @@ async fn build_translator(
                 let base = profile.effective_base_url().unwrap_or_default();
                 ensure_ollama_model(client.as_ref(), &base, &profile.model).await?;
             }
-            Ok(Box::new(LlmTranslator::new(client, None)))
+            Ok(Box::new(LlmTranslator::new(client, skill)))
         }
     }
 }
 
 async fn run_app() -> anyhow::Result<()> {
-    if std::env::args().skip(1).any(|a| a == "--list-profiles") {
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    if raw_args.iter().any(|a| a == "--list-profiles") {
         return print_profiles();
+    }
+    if raw_args.iter().any(|a| a == "--list-skills") {
+        return print_skills();
     }
     let cli = Cli::parse();
     let config = AppConfig::load().context("failed to load application configuration")?;
@@ -134,7 +150,11 @@ async fn run_app() -> anyhow::Result<()> {
     let translator_box: Option<Box<dyn Translator>> = if cli.skip_translate {
         None
     } else {
-        Some(build_translator(&cli, store.as_ref()).await?)
+        let skill = choose_skill(&cli, store.as_ref())?;
+        if let Some(s) = &skill {
+            eprintln!("Skill: {}", s.name);
+        }
+        Some(build_translator(&cli, store.as_ref(), skill).await?)
     };
 
     let deps = Deps {
