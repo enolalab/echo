@@ -14,6 +14,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { isTauri } from '../lib/ipc';
 import type { SubtitleSegment, StylePreset } from '../types';
 import { SubtitleOverlay } from './SubtitleOverlay';
+import { SeekBar } from './SeekBar';
 
 interface VideoPlayerProps {
   videoPath: string;
@@ -111,11 +112,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   };
 
-  const handleSliderSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newMs = Number(e.target.value);
+  const handleSeek = (ms: number) => {
     if (videoRef.current) {
-      videoRef.current.currentTime = newMs / 1000;
-      onTimeUpdate(newMs);
+      videoRef.current.currentTime = ms / 1000;
+      onTimeUpdate(ms);
     }
   };
 
@@ -252,16 +252,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       {/* Control Bar */}
       <div className="h-14 bg-slate-900/90 border-t border-slate-800 px-4 flex flex-col justify-center gap-1 text-slate-300">
-        {/* Seek timeline bar */}
+        {/* Seek timeline bar with subtitle blocks */}
         <div className="flex items-center gap-2">
-          <input
-            type="range"
-            min={0}
-            max={durationMs || 100}
-            value={currentTimeMs}
-            onChange={handleSliderSeek}
-            disabled={!videoSrc}
-            className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+          <SeekBar
+            durationMs={durationMs}
+            segments={segments}
+            currentTimeMs={currentTimeMs}
+            onSeek={handleSeek}
           />
         </div>
 
