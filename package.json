@@ -2,8 +2,10 @@
   "name": "auto-subtitle-workspace",
   "private": true,
   "scripts": {
-    "dev": "npm --prefix ui run dev",
+    "dev": "npm --prefix ui run tauri dev",
+    "dev:web": "npm --prefix ui run dev",
     "build": "npm --prefix ui run build",
+    "build:app": "npm --prefix ui run tauri build",
     "tauri": "npm --prefix ui run tauri"
   }
 }

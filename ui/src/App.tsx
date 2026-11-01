@@ -11,6 +11,7 @@ import {
   cancelPipeline,
   exportSubtitles,
   openInFileManager,
+  isTauri,
 } from './lib/ipc';
 import type {
   SubtitleSegment,
@@ -51,6 +52,10 @@ export default function App() {
 
   // Setup Tauri event listeners
   useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+
     let unlistenStage: (() => void) | undefined;
     let unlistenLog: (() => void) | undefined;
 
@@ -85,9 +90,8 @@ export default function App() {
     input.onchange = (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (file) {
-        // In Tauri or web, get path or name
-        // @ts-ignore
-        const fullPath = file.path || file.name;
+        // In Tauri webview: file.path exists; in browser: create object URL
+        const fullPath = (file as any).path || URL.createObjectURL(file);
         setVideoPath(fullPath);
       }
     };

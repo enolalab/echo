@@ -10,6 +10,7 @@ import {
   Repeat,
 } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { isTauri } from '../lib/ipc';
 import type { SubtitleSegment, StylePreset } from '../types';
 import { SubtitleOverlay } from './SubtitleOverlay';
 
@@ -52,11 +53,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Convert local filesystem path to Tauri Asset URL safely
   const videoSrc = React.useMemo(() => {
     if (!videoPath) return '';
-    try {
-      return convertFileSrc(videoPath);
-    } catch {
-      return videoPath;
+    if (isTauri()) {
+      try {
+        return convertFileSrc(videoPath);
+      } catch {
+        return videoPath;
+      }
     }
+    return videoPath;
   }, [videoPath]);
 
   // Handle external seek request (e.g. from clicking a subtitle row)
