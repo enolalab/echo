@@ -24,5 +24,10 @@
     "security": {
       "csp": null
     }
+  },
+  "bundle": {
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
   }
 }
