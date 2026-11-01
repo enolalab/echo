@@ -19,6 +19,8 @@ jobs:
       tag: ${{ steps.out.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Compute tag
         id: out
