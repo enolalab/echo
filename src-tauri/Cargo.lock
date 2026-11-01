@@ -164,10 +164,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "auto-subtitle",
+ "dirs 5.0.1",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tempfile",
  "tokio",
 ]
 
