@@ -6,6 +6,7 @@ import { SubtitleEditor } from './components/SubtitleEditor';
 import { ProgressDrawer } from './components/ProgressDrawer';
 import { ExportModal } from './components/ExportModal';
 import { JobList } from './components/JobList';
+import { SettingsModal } from './components/SettingsModal';
 import { useSystemInfo } from './hooks/useSystemInfo';
 import {
   startPipeline,
@@ -14,12 +15,16 @@ import {
   openInFileManager,
   pickVideoFiles,
   getOutputDir,
+  getSettings,
+  saveGeneral,
+  setDefaultProfile,
   listenPipelineProgress,
   isTauri,
 } from './lib/ipc';
 import type {
   SubtitleSegment,
-  StylePreset,
+  GeneralSettings,
+  SettingsView,
   PipelineStageEvent,
   BatchJob,
 } from './types';
@@ -31,11 +36,18 @@ export default function App() {
   const { systemInfo, downloadModel, downloadingModel } = useSystemInfo();
 
   // App settings state
-  const [whisperModel, setWhisperModel] = useState('base');
-  const [ollamaModel, setOllamaModel] = useState('qwen2.5:7b');
-  const [targetLang, setTargetLang] = useState('vi');
-  const [bilingual, setBilingual] = useState(true);
-  const [stylePreset, setStylePreset] = useState<StylePreset>('youtube_yellow');
+  const [general, setGeneral] = useState<GeneralSettings>({
+    whisper_model: 'base',
+    target_lang: 'vi',
+    bilingual: true,
+    style_preset: 'youtube_yellow',
+    use_cloud_stt: false,
+  });
+  const [settingsView, setSettingsView] = useState<SettingsView | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const lastSavedGeneral = useRef<string | null>(null);
+  const patchGeneral = (patch: Partial<GeneralSettings>) => setGeneral((g) => ({ ...g, ...patch }));
+  const { whisper_model: whisperModel, target_lang: targetLang, bilingual, style_preset: stylePreset } = general;
 
   // Batch jobs state
   const [jobs, setJobs] = useState<BatchJob[]>([]);
@@ -70,14 +82,37 @@ export default function App() {
       .catch((err) => console.warn('getOutputDir failed:', err));
   }, []);
 
-  // Auto-select first available Ollama model
+  // Load persisted settings once
   useEffect(() => {
-    if (systemInfo?.ollama_models && systemInfo.ollama_models.length > 0) {
-      if (!systemInfo.ollama_models.includes(ollamaModel)) {
-        setOllamaModel(systemInfo.ollama_models[0]);
-      }
+    getSettings()
+      .then((s) => {
+        lastSavedGeneral.current = JSON.stringify(s.general);
+        setGeneral(s.general);
+        setSettingsView(s);
+        if (s.load_warning) setLogs((prev) => [...prev, `[CẢNH BÁO] ${s.load_warning}`]);
+      })
+      .catch((err) => console.warn('getSettings failed:', err));
+  }, []);
+
+  // Persist general settings, debounced
+  useEffect(() => {
+    if (lastSavedGeneral.current === null) return;
+    const serialized = JSON.stringify(general);
+    if (serialized === lastSavedGeneral.current) return;
+    const timer = setTimeout(() => {
+      lastSavedGeneral.current = serialized;
+      saveGeneral(general).catch((err) => console.warn('saveGeneral failed:', err));
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [general]);
+
+  const handleSelectProfile = async (id: string) => {
+    try {
+      setSettingsView(await setDefaultProfile(id));
+    } catch (err) {
+      setLogs((prev) => [...prev, `[LỖI] ${String(err)}`]);
     }
-  }, [systemInfo, ollamaModel]);
+  };
 
   // Setup pipeline progress listener — routes progress to the right job
   useEffect(() => {
@@ -194,11 +229,10 @@ export default function App() {
         job_id: job.id,
         video_path: job.videoPath,
         whisper_model: whisperModel,
-        use_cloud_stt: false,
+        use_cloud_stt: general.use_cloud_stt,
         target_lang: targetLang,
         skip_translate: false,
-        use_cloud_llm: false,
-        llm_model: ollamaModel,
+        profile_id: settingsView?.default_profile_id ?? null,
       });
       updateJob(job.id, { status: 'done', segments: result });
     } catch (err) {
@@ -359,15 +393,17 @@ export default function App() {
         jobCount={jobs.length}
         onSelectVideo={handleSelectVideos}
         whisperModel={whisperModel}
-        onSelectWhisperModel={setWhisperModel}
-        ollamaModel={ollamaModel}
-        onSelectOllamaModel={setOllamaModel}
+        onSelectWhisperModel={(m) => patchGeneral({ whisper_model: m })}
+        profiles={settingsView?.profiles ?? []}
+        defaultProfileId={settingsView?.default_profile_id ?? null}
+        onSelectProfile={handleSelectProfile}
+        onOpenSettings={() => setIsSettingsOpen(true)}
         targetLang={targetLang}
-        onSelectTargetLang={setTargetLang}
+        onSelectTargetLang={(l) => patchGeneral({ target_lang: l })}
         bilingual={bilingual}
-        onToggleBilingual={() => setBilingual(!bilingual)}
+        onToggleBilingual={() => patchGeneral({ bilingual: !bilingual })}
         stylePreset={stylePreset}
-        onSelectPreset={setStylePreset}
+        onSelectPreset={(p) => patchGeneral({ style_preset: p })}
         isRunning={isRunning}
         onStart={handleStart}
         onCancel={handleCancel}
@@ -453,6 +489,19 @@ export default function App() {
           if (selectedJobId) updateJob(selectedJobId, { outputVideoPath: path });
         }}
       />
+
+      {/* 5. Settings Modal */}
+      {settingsView && (
+        <SettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          settings={settingsView}
+          onSettingsChange={setSettingsView}
+          general={general}
+          onGeneralChange={setGeneral}
+          whisperModels={systemInfo?.whisper_models ?? []}
+        />
+      )}
     </div>
   );
 }

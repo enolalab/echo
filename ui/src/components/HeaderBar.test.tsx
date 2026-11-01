@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { HeaderBar } from './HeaderBar';
 
@@ -11,8 +11,10 @@ describe('HeaderBar', () => {
         onSelectVideo={vi.fn()}
         whisperModel="base"
         onSelectWhisperModel={vi.fn()}
-        ollamaModel="qwen2.5:7b"
-        onSelectOllamaModel={vi.fn()}
+        profiles={[]}
+        defaultProfileId={null}
+        onSelectProfile={vi.fn()}
+        onOpenSettings={vi.fn()}
         targetLang="vi"
         onSelectTargetLang={vi.fn()}
         bilingual={true}
@@ -38,8 +40,10 @@ describe('HeaderBar', () => {
         onSelectVideo={vi.fn()}
         whisperModel="base"
         onSelectWhisperModel={vi.fn()}
-        ollamaModel="qwen2.5:7b"
-        onSelectOllamaModel={vi.fn()}
+        profiles={[]}
+        defaultProfileId={null}
+        onSelectProfile={vi.fn()}
+        onOpenSettings={vi.fn()}
         targetLang="vi"
         onSelectTargetLang={vi.fn()}
         bilingual={true}
@@ -57,5 +61,44 @@ describe('HeaderBar', () => {
     const startBtn = screen.getByRole('button', { name: /Bắt Đầu/i }) as HTMLButtonElement;
     expect(startBtn.disabled).toBe(false);
     expect(screen.getByText('movie.mp4')).toBeDefined();
+  });
+
+  it('renders profiles, marks default, and reports selection and settings click', () => {
+    const onSelectProfile = vi.fn();
+    const onOpenSettings = vi.fn();
+    render(
+      <HeaderBar
+        videoPath=""
+        onSelectVideo={vi.fn()}
+        whisperModel="base"
+        onSelectWhisperModel={vi.fn()}
+        profiles={[
+          { id: 'o', name: 'Ollama local', kind: 'ollama', base_url: null, model: 'qwen2.5:7b', has_key: false },
+          { id: 'd', name: 'DeepSeek', kind: 'deepseek', base_url: null, model: 'deepseek-chat', has_key: true },
+        ]}
+        defaultProfileId="o"
+        onSelectProfile={onSelectProfile}
+        onOpenSettings={onOpenSettings}
+        targetLang="vi"
+        onSelectTargetLang={vi.fn()}
+        bilingual={true}
+        onToggleBilingual={vi.fn()}
+        stylePreset="youtube_yellow"
+        onSelectPreset={vi.fn()}
+        isRunning={false}
+        onStart={vi.fn()}
+        onCancel={vi.fn()}
+        systemInfo={null}
+        onDownloadModel={vi.fn()}
+        downloadingModel={null}
+      />
+    );
+    const select = screen.getByLabelText('Provider profile') as HTMLSelectElement;
+    expect(select.value).toBe('o');
+    expect(screen.getByRole('option', { name: /DeepSeek · deepseek-chat/ })).toBeDefined();
+    fireEvent.change(select, { target: { value: 'd' } });
+    expect(onSelectProfile).toHaveBeenCalledWith('d');
+    fireEvent.click(screen.getByRole('button', { name: 'Cài đặt' }));
+    expect(onOpenSettings).toHaveBeenCalled();
   });
 });

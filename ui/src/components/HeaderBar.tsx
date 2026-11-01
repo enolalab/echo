@@ -9,8 +9,10 @@ import {
   Languages,
   Sparkles,
   Palette,
+  Settings,
 } from 'lucide-react';
-import type { SystemInfo, StylePreset } from '../types';
+import type { SystemInfo, StylePreset, ProfileView } from '../types';
+import { KIND_ICONS } from '../lib/providers';
 
 interface HeaderBarProps {
   videoPath: string;
@@ -18,8 +20,10 @@ interface HeaderBarProps {
   onSelectVideo: () => void;
   whisperModel: string;
   onSelectWhisperModel: (m: string) => void;
-  ollamaModel: string;
-  onSelectOllamaModel: (m: string) => void;
+  profiles: ProfileView[];
+  defaultProfileId: string | null;
+  onSelectProfile: (id: string) => void;
+  onOpenSettings: () => void;
   targetLang: string;
   onSelectTargetLang: (l: string) => void;
   bilingual: boolean;
@@ -40,8 +44,10 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onSelectVideo,
   whisperModel,
   onSelectWhisperModel,
-  ollamaModel,
-  onSelectOllamaModel,
+  profiles,
+  defaultProfileId,
+  onSelectProfile,
+  onOpenSettings,
   targetLang,
   onSelectTargetLang,
   bilingual,
@@ -140,27 +146,35 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           )}
         </div>
 
-        {/* Ollama / LLM Translation selector */}
+        {/* Provider profile selector */}
         <div className="flex items-center bg-slate-900/60 rounded-md border border-slate-700 px-1.5 py-0.5">
           <Languages className="w-3.5 h-3.5 text-indigo-400 mr-1.5" />
           <select
-            value={ollamaModel}
-            onChange={(e) => onSelectOllamaModel(e.target.value)}
-            disabled={isRunning}
-            className="bg-transparent text-slate-200 focus:outline-none py-1 text-xs cursor-pointer max-w-[130px] truncate"
+            aria-label="Provider profile"
+            value={defaultProfileId ?? ''}
+            onChange={(e) => onSelectProfile(e.target.value)}
+            disabled={isRunning || profiles.length === 0}
+            className="bg-transparent text-slate-200 focus:outline-none py-1 text-xs cursor-pointer max-w-[180px] truncate"
           >
-            {systemInfo?.ollama_models && systemInfo.ollama_models.length > 0 ? (
-              systemInfo.ollama_models.map((m) => (
-                <option key={m} value={m} className="bg-slate-800">
-                  {m}
-                </option>
-              ))
-            ) : (
-              <option value="qwen2.5:7b" className="bg-slate-800">
-                qwen2.5:7b
+            {profiles.length === 0 && (
+              <option value="" className="bg-slate-800">
+                Chưa có profile
               </option>
             )}
+            {profiles.map((p) => (
+              <option key={p.id} value={p.id} className="bg-slate-800">
+                {KIND_ICONS[p.kind]} {p.name} · {p.model}
+              </option>
+            ))}
           </select>
+          <button
+            onClick={onOpenSettings}
+            aria-label="Cài đặt"
+            title="Cài đặt provider & chung"
+            className="ml-1 text-slate-400 hover:text-white p-0.5"
+          >
+            <Settings className="w-3.5 h-3.5" />
+          </button>
         </div>
 
         {/* Target Language */}
