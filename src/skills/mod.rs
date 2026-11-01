@@ -1,3 +1,4 @@
+pub mod io;
 pub mod model;
 pub mod presets;
 pub mod prompt;
