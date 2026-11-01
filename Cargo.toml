@@ -41,4 +41,5 @@ keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 wiremock = "0.6"

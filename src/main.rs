@@ -8,9 +8,9 @@ use auto_subtitle::pipeline::{self, Deps};
 use auto_subtitle::stt::whisper_api::ApiTranscriber;
 use auto_subtitle::stt::whisper_local::LocalWhisperTranscriber;
 use auto_subtitle::stt::Transcriber;
-use auto_subtitle::translate::ollama::OllamaTranslator;
-use auto_subtitle::translate::openai_compat::OpenAiCompatTranslator;
-use auto_subtitle::translate::Translator;
+use auto_subtitle::llm::ollama::{ensure_ollama_model, OllamaChatClient};
+use auto_subtitle::llm::openai::OpenAiChatClient;
+use auto_subtitle::translate::{LlmTranslator, Translator};
 
 async fn run_app() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -69,21 +69,21 @@ async fn run_app() -> anyhow::Result<()> {
     } else {
         match cli.translate_engine {
             TranslateEngine::Ollama => {
-                let translator =
-                    OllamaTranslator::new(cli.ollama_url.clone(), cli.ollama_model.clone());
-                translator.health_check().await?;
-                Some(Box::new(translator))
+                let client = OllamaChatClient::new(cli.ollama_url.clone(), cli.ollama_model.clone());
+                ensure_ollama_model(&client, &cli.ollama_url, &cli.ollama_model).await?;
+                Some(Box::new(LlmTranslator::new(Box::new(client), None)))
             }
             TranslateEngine::OpenaiCompat => {
                 let api_key = cli
                     .api_key
                     .clone()
                     .context("--api-key or OPENAI_API_KEY required for translation")?;
-                Some(Box::new(OpenAiCompatTranslator::new(
+                let client = OpenAiChatClient::new(
                     cli.api_base_url.clone(),
-                    api_key,
+                    Some(api_key),
                     cli.api_model.clone(),
-                )))
+                );
+                Some(Box::new(LlmTranslator::new(Box::new(client), None)))
             }
         }
     };

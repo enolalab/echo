@@ -1,9 +1,7 @@
-pub mod ollama;
-pub mod openai_compat;
+pub mod llm_translator;
 pub mod prompt;
 
-pub use ollama::OllamaTranslator;
-pub use openai_compat::OpenAiCompatTranslator;
+pub use llm_translator::LlmTranslator;
 
 use crate::subtitle::model::SubtitleSegment;
 

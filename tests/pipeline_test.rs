@@ -149,6 +149,35 @@ fn output_equal_to_input_is_rejected() {
     assert!(resolve_output_paths(&cli).is_err());
 }
 
+struct LlmFails(AtomicUsize, auto_subtitle::llm::LlmError, usize);
+#[async_trait]
+impl Translator for LlmFails {
+    async fn translate_batch(&self, s: &[S], a: &str, b: &str) -> anyhow::Result<Vec<String>> {
+        let n = self.0.fetch_add(1, Ordering::SeqCst);
+        if n < self.2 {
+            return Err(anyhow::Error::new(self.1.clone()));
+        }
+        Prefix.translate_batch(s, a, b).await
+    }
+}
+
+#[tokio::test]
+async fn auth_error_stops_without_retry() {
+    let t = LlmFails(AtomicUsize::new(0), auto_subtitle::llm::LlmError::Auth, usize::MAX);
+    let err = translate_all(&t, &mut many(3), "en", "vi").await.unwrap_err();
+    assert_eq!(t.0.load(Ordering::SeqCst), 1);
+    assert!(format!("{err:#}").contains("API key không hợp lệ"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn rate_limit_backs_off_then_succeeds() {
+    let t = LlmFails(AtomicUsize::new(0), auto_subtitle::llm::LlmError::RateLimit, 2);
+    let start = tokio::time::Instant::now();
+    translate_all(&t, &mut many(3), "en", "vi").await.unwrap();
+    assert_eq!(t.0.load(Ordering::SeqCst), 3);
+    assert!(start.elapsed() >= std::time::Duration::from_secs(6));
+}
+
 /// Real FFmpeg E2E with mock AI. Skips (passes) when ffmpeg is not installed.
 #[tokio::test]
 async fn hardsub_and_softsub_e2e_with_synthetic_video() {

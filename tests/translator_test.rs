@@ -1,12 +1,7 @@
+use auto_subtitle::llm::{ChatClient, LlmError};
 use auto_subtitle::subtitle::model::SubtitleSegment as S;
-use auto_subtitle::translate::{
-    ollama::OllamaTranslator, openai_compat::OpenAiCompatTranslator, prompt::*, Translator,
-};
-use serde_json::json;
-use wiremock::{
-    matchers::{header, method, path},
-    Mock, MockServer, ResponseTemplate,
-};
+use auto_subtitle::translate::{prompt::*, LlmTranslator, Translator};
+use std::sync::{Arc, Mutex};
 
 fn batch() -> Vec<S> {
     vec![
@@ -44,74 +39,49 @@ fn parse_ignores_extras_and_out_of_range() {
     assert_eq!(ok, vec!["First", "Second"]);
 }
 
+struct Recorder {
+    seen: Arc<Mutex<Vec<(Option<String>, String)>>>,
+    reply: Result<String, LlmError>,
+}
+
+#[async_trait::async_trait]
+impl ChatClient for Recorder {
+    async fn chat(&self, system: Option<&str>, user: &str) -> Result<String, LlmError> {
+        self.seen.lock().unwrap().push((system.map(String::from), user.to_string()));
+        self.reply.clone()
+    }
+    async fn list_models(&self) -> Result<Vec<String>, LlmError> {
+        Ok(vec![])
+    }
+}
+
 #[tokio::test]
-async fn ollama_translate_and_health() {
-    let s = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/api/tags"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!({"models":[{"name":"qwen2.5:7b"}]})),
-        )
-        .mount(&s)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/api/chat"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!({"message":{"content":"[1] A\n[2] B"}})),
-        )
-        .mount(&s)
-        .await;
-    let t = OllamaTranslator::new(s.uri(), "qwen2.5:7b".into());
-    t.health_check().await.unwrap();
-    assert_eq!(
-        t.translate_batch(&batch(), "en", "vi").await.unwrap(),
-        vec!["A", "B"]
+async fn llm_translator_forwards_prompt_and_system() {
+    let seen = Arc::new(Mutex::new(vec![]));
+    let t = LlmTranslator::new(
+        Box::new(Recorder { seen: seen.clone(), reply: Ok("[1] A\n[2] B / C".into()) }),
+        Some("Bạn là chuyên gia Toán".into()),
     );
-    assert!(OllamaTranslator::new(s.uri(), "llama3".into())
-        .health_check()
-        .await
-        .is_err());
+    assert_eq!(t.translate_batch(&batch(), "en", "vi").await.unwrap(), vec!["A", "B\nC"]);
+    let calls = seen.lock().unwrap();
+    assert_eq!(calls[0].0.as_deref(), Some("Bạn là chuyên gia Toán"));
+    assert!(calls[0].1.contains("[2] How are / you?"));
 }
 
 #[tokio::test]
-async fn ollama_health_matches_name_without_tag_to_latest() {
-    let s = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/api/tags"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!({"models":[{"name":"qwen2.5:latest"}]})),
-        )
-        .mount(&s)
-        .await;
-    let t = OllamaTranslator::new(s.uri(), "qwen2.5".into());
-    t.health_check().await.unwrap();
-}
-
-#[tokio::test]
-async fn ollama_unreachable_is_actionable_error() {
-    let err = OllamaTranslator::new("http://127.0.0.1:9".into(), "x".into())
-        .health_check()
-        .await
-        .unwrap_err();
-    assert!(format!("{err:#}").contains("ollama serve"));
-}
-
-#[tokio::test]
-async fn openai_compat_sends_bearer_and_surfaces_http_errors() {
-    let s = MockServer::start().await;
-    Mock::given(path("/chat/completions"))
-        .and(header("authorization", "Bearer k"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(json!({"choices":[{"message":{"content":"[1] A\n[2] B"}}]})),
-        )
-        .mount(&s)
-        .await;
-    let t = OpenAiCompatTranslator::new(s.uri(), "k".into(), "m".into());
-    assert_eq!(
-        t.translate_batch(&batch(), "en", "vi").await.unwrap().len(),
-        2
+async fn llm_translator_wraps_llm_error_for_downcast() {
+    let t = LlmTranslator::new(
+        Box::new(Recorder { seen: Arc::new(Mutex::new(vec![])), reply: Err(LlmError::Auth) }),
+        None,
     );
-    let bad = OpenAiCompatTranslator::new(s.uri(), "wrong".into(), "m".into());
-    assert!(bad.translate_batch(&batch(), "en", "vi").await.is_err()); // wiremock returns 404
+    let err = t.translate_batch(&batch(), "en", "vi").await.unwrap_err();
+    assert_eq!(err.downcast_ref::<LlmError>(), Some(&LlmError::Auth));
+}
+
+#[tokio::test]
+async fn llm_translator_empty_input_skips_call() {
+    let seen = Arc::new(Mutex::new(vec![]));
+    let t = LlmTranslator::new(Box::new(Recorder { seen: seen.clone(), reply: Ok(String::new()) }), None);
+    assert!(t.translate_batch(&[], "en", "vi").await.unwrap().is_empty());
+    assert!(seen.lock().unwrap().is_empty());
 }

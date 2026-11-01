@@ -177,7 +177,7 @@ where
         let mut last_err = None;
         let mut success = false;
 
-        for _attempt in 1..=MAX_ATTEMPTS {
+        for attempt in 1..=MAX_ATTEMPTS {
             match t.translate_batch(chunk, src, tgt).await {
                 Ok(translated_lines) => {
                     if translated_lines.len() != chunk.len() {
@@ -200,7 +200,20 @@ where
                     break;
                 }
                 Err(err) => {
+                    let llm_err = err
+                        .chain()
+                        .find_map(|e| e.downcast_ref::<crate::llm::LlmError>())
+                        .cloned();
                     last_err = Some(err);
+                    if let Some(llm_err) = llm_err {
+                        if !llm_err.is_retryable() {
+                            break;
+                        }
+                        if llm_err.should_backoff() && attempt < MAX_ATTEMPTS {
+                            tokio::time::sleep(std::time::Duration::from_secs(2 * attempt as u64))
+                                .await;
+                        }
+                    }
                 }
             }
         }
