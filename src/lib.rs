@@ -5,6 +5,7 @@ pub mod llm;
 pub mod media;
 pub mod pipeline;
 pub mod settings;
+pub mod skills;
 pub mod stt;
 pub mod subtitle;
 pub mod translate;
