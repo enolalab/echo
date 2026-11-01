@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { getSystemInfo, listenPipelineProgress } from './ipc';
+import { invoke } from '@tauri-apps/api/core';
+import { getSystemInfo, listenPipelineProgress, getSettings, saveProfile, testProfile, listProfileModels, saveGeneral } from './ipc';
+import { defaultBaseUrl, requiresBaseUrl, requiresApiKey, emptyProfile, KIND_LABELS } from './providers';
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn().mockImplementation((cmd: string) => {
@@ -47,5 +49,36 @@ describe('IPC Client', () => {
     expect(received).not.toBeNull();
     expect(received.percentage).toBe(75.0);
     unlisten();
+  });
+});
+
+describe('settings IPC', () => {
+  it('passes camelCase apiKey and null to keep the stored key', async () => {
+    const profile = { id: 'p1', name: 'DS', kind: 'deepseek' as const, base_url: null, model: 'deepseek-chat' };
+    await saveProfile(profile, null);
+    expect(invoke).toHaveBeenCalledWith('save_profile', { profile, apiKey: null });
+    await testProfile(profile, 'sk');
+    expect(invoke).toHaveBeenCalledWith('test_profile', { profile, apiKey: 'sk' });
+    await listProfileModels(profile, null);
+    expect(invoke).toHaveBeenCalledWith('list_profile_models', { profile, apiKey: null });
+  });
+
+  it('calls get_settings and save_general', async () => {
+    await getSettings();
+    expect(invoke).toHaveBeenCalledWith('get_settings');
+    const general = { whisper_model: 'base', target_lang: 'vi', bilingual: true, style_preset: 'youtube_yellow' as const, use_cloud_stt: false };
+    await saveGeneral(general);
+    expect(invoke).toHaveBeenCalledWith('save_general', { general });
+  });
+});
+
+describe('provider helpers', () => {
+  it('knows defaults and requirements', () => {
+    expect(defaultBaseUrl('deepseek')).toBe('https://api.deepseek.com/v1');
+    expect(defaultBaseUrl('openai_compatible')).toBeNull();
+    expect(requiresBaseUrl('anthropic_compatible')).toBe(true);
+    expect(requiresApiKey('ollama')).toBe(false);
+    expect(KIND_LABELS.anthropic).toBe('Anthropic');
+    expect(emptyProfile()).toEqual({ id: '', name: '', kind: 'openai', base_url: null, model: '' });
   });
 });

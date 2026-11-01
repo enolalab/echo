@@ -25,13 +25,9 @@ export interface PipelineConfig {
   subtitle_path?: string | null;
   whisper_model: string;
   use_cloud_stt: boolean;
-  stt_api_key?: string | null;
   target_lang: string;
   skip_translate: boolean;
-  use_cloud_llm: boolean;
-  llm_model: string;
-  llm_api_base?: string | null;
-  llm_api_key?: string | null;
+  profile_id?: string | null;
 }
 
 export type ExportMode = 'hardsub' | 'softsub' | 'subs_only';
@@ -70,5 +66,48 @@ export interface BatchJob {
   progress: PipelineProgressEvent | null;
   segments: SubtitleSegment[];
   outputVideoPath: string | null;
+  error: string | null;
+}
+
+export type ProviderKind =
+  | 'openai'
+  | 'openai_compatible'
+  | 'anthropic'
+  | 'anthropic_compatible'
+  | 'deepseek'
+  | 'ollama';
+
+export interface ProviderProfile {
+  id: string;
+  name: string;
+  kind: ProviderKind;
+  base_url: string | null;
+  model: string;
+}
+
+export interface ProfileView extends ProviderProfile {
+  has_key: boolean;
+}
+
+export interface GeneralSettings {
+  whisper_model: string;
+  target_lang: string;
+  bilingual: boolean;
+  style_preset: StylePreset;
+  use_cloud_stt: boolean;
+}
+
+export interface SettingsView {
+  profiles: ProfileView[];
+  default_profile_id: string | null;
+  general: GeneralSettings;
+  stt_has_key: boolean;
+  secrets_backend: 'keyring' | 'file';
+  load_warning: string | null;
+}
+
+export interface ConnectionTest {
+  ok: boolean;
+  latency_ms: number;
   error: string | null;
 }

@@ -6,6 +6,10 @@ import type {
   ExportRequest,
   SubtitleSegment,
   PipelineProgressEvent,
+  SettingsView,
+  ProviderProfile,
+  GeneralSettings,
+  ConnectionTest,
 } from '../types';
 
 export function isTauri(): boolean {
@@ -159,4 +163,91 @@ export async function pickSaveFile(defaultName: string, extension: string): Prom
     return null;
   }
   return await invoke<string | null>('pick_save_file', { defaultName, extension });
+}
+
+let mockSettings: SettingsView = {
+  profiles: [
+    { id: 'mock-ollama', name: 'Ollama local', kind: 'ollama', base_url: null, model: 'qwen2.5:7b', has_key: false },
+  ],
+  default_profile_id: 'mock-ollama',
+  general: {
+    whisper_model: 'base',
+    target_lang: 'vi',
+    bilingual: true,
+    style_preset: 'youtube_yellow',
+    use_cloud_stt: false,
+  },
+  stt_has_key: false,
+  secrets_backend: 'keyring',
+  load_warning: null,
+};
+
+const cloneMock = (): SettingsView => JSON.parse(JSON.stringify(mockSettings));
+
+export async function getSettings(): Promise<SettingsView> {
+  if (!isTauri()) return cloneMock();
+  return await invoke<SettingsView>('get_settings');
+}
+
+export async function saveProfile(profile: ProviderProfile, apiKey: string | null): Promise<SettingsView> {
+  if (!isTauri()) {
+    const id = profile.id || `mock-${Date.now()}`;
+    const existing = mockSettings.profiles.find((p) => p.id === id);
+    const hasKey = apiKey === null ? existing?.has_key ?? false : apiKey.trim() !== '';
+    const next = { ...profile, id, has_key: hasKey };
+    mockSettings.profiles = existing
+      ? mockSettings.profiles.map((p) => (p.id === id ? next : p))
+      : [...mockSettings.profiles, next];
+    mockSettings.default_profile_id ??= id;
+    return cloneMock();
+  }
+  return await invoke<SettingsView>('save_profile', { profile, apiKey });
+}
+
+export async function deleteProfile(id: string): Promise<SettingsView> {
+  if (!isTauri()) {
+    mockSettings.profiles = mockSettings.profiles.filter((p) => p.id !== id);
+    if (mockSettings.default_profile_id === id) {
+      mockSettings.default_profile_id = mockSettings.profiles[0]?.id ?? null;
+    }
+    return cloneMock();
+  }
+  return await invoke<SettingsView>('delete_profile', { id });
+}
+
+export async function setDefaultProfile(id: string): Promise<SettingsView> {
+  if (!isTauri()) {
+    mockSettings.default_profile_id = id;
+    return cloneMock();
+  }
+  return await invoke<SettingsView>('set_default_profile', { id });
+}
+
+export async function saveGeneral(general: GeneralSettings): Promise<SettingsView> {
+  if (!isTauri()) {
+    mockSettings.general = { ...general };
+    return cloneMock();
+  }
+  return await invoke<SettingsView>('save_general', { general });
+}
+
+export async function setSttKey(key: string): Promise<SettingsView> {
+  if (!isTauri()) {
+    mockSettings.stt_has_key = key.trim() !== '';
+    return cloneMock();
+  }
+  return await invoke<SettingsView>('set_stt_key', { key });
+}
+
+export async function testProfile(profile: ProviderProfile, apiKey: string | null): Promise<ConnectionTest> {
+  if (!isTauri()) {
+    await new Promise((r) => setTimeout(r, 300));
+    return { ok: true, latency_ms: 300, error: null };
+  }
+  return await invoke<ConnectionTest>('test_profile', { profile, apiKey });
+}
+
+export async function listProfileModels(profile: ProviderProfile, apiKey: string | null): Promise<string[]> {
+  if (!isTauri()) return ['qwen2.5:7b', 'llama3:8b'];
+  return await invoke<string[]>('list_profile_models', { profile, apiKey });
 }
