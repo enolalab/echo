@@ -1,5 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { FileVideo } from 'lucide-react';
+import { SplitPane } from './components/SplitPane';
+import { Toasts } from './components/Toasts';
+import { useFileDrop } from './hooks/useFileDrop';
+import { useToasts } from './hooks/useToasts';
 import { HeaderBar } from './components/HeaderBar';
 import { VideoPlayer } from './components/VideoPlayer';
 import { SubtitleEditor } from './components/SubtitleEditor';
@@ -48,6 +53,7 @@ export default function App() {
   const [settingsView, setSettingsView] = useState<SettingsView | null>(null);
   const settingsRef = useRef<SettingsView | null>(null);
   settingsRef.current = settingsView;
+  const { toasts, pushToast, dismissToast } = useToasts();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const lastSavedGeneral = useRef<string | null>(null);
   const patchGeneral = (patch: Partial<GeneralSettings>) => setGeneral((g) => ({ ...g, ...patch }));
@@ -93,7 +99,10 @@ export default function App() {
         lastSavedGeneral.current = JSON.stringify(s.general);
         setGeneral(s.general);
         setSettingsView(s);
-        if (s.load_warning) setLogs((prev) => [...prev, `[CẢNH BÁO] ${s.load_warning}`]);
+        if (s.load_warning) {
+          setLogs((prev) => [...prev, `[CẢNH BÁO] ${s.load_warning}`]);
+          pushToast(s.load_warning, 'info');
+        }
       })
       .catch((err) => console.warn('getSettings failed:', err));
   }, []);
@@ -115,6 +124,7 @@ export default function App() {
       setSettingsView(await setDefaultProfile(id));
     } catch (err) {
       setLogs((prev) => [...prev, `[LỖI] ${String(err)}`]);
+      pushToast(String(err), 'error');
     }
   };
 
@@ -123,6 +133,7 @@ export default function App() {
       setSettingsView(await setDefaultSkill(id));
     } catch (err) {
       setLogs((prev) => [...prev, `[LỖI] ${String(err)}`]);
+      pushToast(String(err), 'error');
     }
   };
 
@@ -190,6 +201,18 @@ export default function App() {
     setCurrentTimeMs(0);
   }, []);
 
+  const handleFilesDropped = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) {
+        pushToast('Không có file video/audio hợp lệ', 'error');
+        return;
+      }
+      addJobs(paths);
+    },
+    [addJobs, pushToast]
+  );
+  const { isDragging } = useFileDrop(handleFilesDropped);
+
   const handleSelectVideos = async () => {
     if (isTauri()) {
       try {
@@ -253,6 +276,7 @@ export default function App() {
         skill_id,
       });
       updateJob(job.id, { status: 'done', segments: result });
+      pushToast(`Hoàn tất ${job.videoPath.split(/[/\\]/).pop()}`, 'success');
     } catch (err) {
       const msg = String(err);
       const isCancelled = msg.includes('hủy') || msg.includes('cancel');
@@ -261,6 +285,7 @@ export default function App() {
         error: msg,
       });
       setLogs((prev) => [...prev, `[LỖI] ${job.videoPath}: ${msg}`]);
+      pushToast(msg, 'error');
     }
   };
 
@@ -434,59 +459,63 @@ export default function App() {
         downloadingModel={downloadingModel}
       />
 
-      {/* 2. Main Studio Workspace: Two columns */}
-      <main className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-2 gap-3 p-3 overflow-hidden">
-        {/* Left Column: Video Player + Job List */}
-        <section className="h-full min-h-0 flex flex-col gap-2">
-          <div className="flex-1 min-h-0">
-            <VideoPlayer
-              videoPath={videoPath}
-              outputPath={outputVideoPath}
+      {/* 2. Main Studio Workspace: Two resizable columns */}
+      <main className="flex-1 min-h-0 p-3 overflow-hidden">
+        <SplitPane direction="horizontal" initialRatio={0.5} minA={420} minB={360} storageKey="main">
+          {/* Left Column: Video Player + Job List */}
+          <section className="h-full min-h-0 pr-1.5">
+            <SplitPane direction="vertical" initialRatio={0.7} minA={240} minB={120} storageKey="video-list">
+              <div className="h-full min-h-0 pb-1">
+                <VideoPlayer
+                  videoPath={videoPath}
+                  outputPath={outputVideoPath}
+                  segments={segments}
+                  preset={stylePreset}
+                  isBilingual={bilingual}
+                  currentTimeMs={currentTimeMs}
+                  onTimeUpdate={setCurrentTimeMs}
+                  seekTimeMs={seekTimeMs}
+                  onSeekComplete={() => setSeekTimeMs(null)}
+                />
+              </div>
+
+              {/* Batch job / output list */}
+              <div className="h-full min-h-0 pt-1 bg-slate-900 border border-slate-800 rounded-lg overflow-hidden flex flex-col">
+                <div className="px-3 py-1.5 border-b border-slate-800 text-[11px] font-semibold text-slate-400 uppercase tracking-wide shrink-0">
+                  Danh sách xử lý ({jobs.length})
+                </div>
+                <div className="flex-1 min-h-0">
+                  <JobList
+                    jobs={jobs}
+                    selectedJobId={selectedJobId}
+                    onSelect={setSelectedJobId}
+                    onRemove={handleRemoveJob}
+                    onCancelJob={handleCancelJob}
+                    onOpenFolder={openInFileManager}
+                    skillOptions={settingsView ? allSkills(settingsView).map((s) => ({ id: s.id, name: s.name })) : []}
+                    defaultSkillName={skillName(settingsView, settingsView?.default_skill_id)}
+                    onChangeJobSkill={handleChangeJobSkill}
+                  />
+                </div>
+              </div>
+            </SplitPane>
+          </section>
+
+          {/* Right Column: Subtitle Editor */}
+          <section className="h-full min-h-0 pl-1.5">
+            <SubtitleEditor
               segments={segments}
-              preset={stylePreset}
-              isBilingual={bilingual}
               currentTimeMs={currentTimeMs}
-              onTimeUpdate={setCurrentTimeMs}
-              seekTimeMs={seekTimeMs}
-              onSeekComplete={() => setSeekTimeMs(null)}
+              onSeek={(ms) => setSeekTimeMs(ms)}
+              onUpdateSegment={handleUpdateSegment}
+              onDeleteSegment={handleDeleteSegment}
+              onSplitSegment={handleSplitSegment}
+              onMergeSegment={handleMergeSegment}
+              onAddSegment={handleAddSegment}
+              onBatchReplace={handleBatchReplace}
             />
-          </div>
-
-          {/* Batch job / output list */}
-          <div className="h-44 shrink-0 bg-slate-900 border border-slate-800 rounded-lg overflow-hidden flex flex-col">
-            <div className="px-3 py-1.5 border-b border-slate-800 text-[11px] font-semibold text-slate-400 uppercase tracking-wide shrink-0">
-              Danh sách xử lý ({jobs.length})
-            </div>
-            <div className="flex-1 min-h-0">
-              <JobList
-                jobs={jobs}
-                selectedJobId={selectedJobId}
-                onSelect={setSelectedJobId}
-                onRemove={handleRemoveJob}
-                onCancelJob={handleCancelJob}
-                onOpenFolder={openInFileManager}
-                skillOptions={settingsView ? allSkills(settingsView).map((s) => ({ id: s.id, name: s.name })) : []}
-                defaultSkillName={skillName(settingsView, settingsView?.default_skill_id)}
-                onChangeJobSkill={handleChangeJobSkill}
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* Right Column: Subtitle Editor */}
-        <section className="h-full min-h-0">
-          <SubtitleEditor
-            segments={segments}
-            currentTimeMs={currentTimeMs}
-            onSeek={(ms) => setSeekTimeMs(ms)}
-            onUpdateSegment={handleUpdateSegment}
-            onDeleteSegment={handleDeleteSegment}
-            onSplitSegment={handleSplitSegment}
-            onMergeSegment={handleMergeSegment}
-            onAddSegment={handleAddSegment}
-            onBatchReplace={handleBatchReplace}
-          />
-        </section>
+          </section>
+        </SplitPane>
       </main>
 
       {/* 3. Bottom Progress Drawer */}
@@ -527,6 +556,17 @@ export default function App() {
           whisperModels={systemInfo?.whisper_models ?? []}
         />
       )}
+
+      {/* 6. Drag overlay + Toasts */}
+      {isDragging && (
+        <div className="fixed inset-0 z-40 bg-blue-950/60 border-2 border-dashed border-blue-400 flex items-center justify-center pointer-events-none">
+          <div className="flex flex-col items-center gap-2 text-blue-200">
+            <FileVideo className="w-10 h-10" />
+            <span className="text-sm font-medium">Thả để thêm vào hàng đợi</span>
+          </div>
+        </div>
+      )}
+      <Toasts toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

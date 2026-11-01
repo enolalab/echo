@@ -82,4 +82,11 @@ describe('App settings persistence', () => {
       expect((screen.getByLabelText('Skill') as HTMLSelectElement).value).toBe('builtin:math')
     );
   });
+
+  it('shows drop overlay on dragover', async () => {
+    render(<App />);
+    await waitFor(() => screen.getByDisplayValue('English (EN)'));
+    fireEvent.dragOver(document);
+    expect(screen.getByText('Thả để thêm vào hàng đợi')).toBeDefined();
+  });
 });

@@ -23,7 +23,7 @@ import { useFileDrop, hasValidExtension } from './useFileDrop';
 beforeEach(() => {
   dragCb = null;
   isTauriMock.mockReturnValue(false);
-  (window as unknown as Record<string, unknown>).URL.createObjectURL = vi.fn(() => 'blob:mock');
+  URL.createObjectURL = vi.fn(() => 'blob:mock');
 });
 
 describe('hasValidExtension', () => {

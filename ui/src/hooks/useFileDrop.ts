@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { getCurrentWindow, type UnlistenFn } from '@tauri-apps/api/window';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import type { UnlistenFn } from '@tauri-apps/api/event';
 import { isTauri } from '../lib/ipc';
 
 export const VALID_EXTENSIONS = [
