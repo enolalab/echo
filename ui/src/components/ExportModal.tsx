@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { X, Film, Layers, FileCode, FolderOpen, CheckCircle, Loader2 } from 'lucide-react';
+import { X, Film, Layers, FileCode, FolderOpen, CheckCircle, Loader2, Folder } from 'lucide-react';
 import type { ExportMode, StylePreset, ExportRequest, SubtitleSegment } from '../types';
+import { pickSaveFile } from '../lib/ipc';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -34,6 +35,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
+
+  const handleBrowseOutputPath = async () => {
+    const ext = mode === 'hardsub' ? 'mp4' : mode === 'softsub' ? 'mkv' : 'srt';
+    const filename = outputPath ? outputPath.split('/').pop() || `subtitled.${ext}` : `subtitled.${ext}`;
+    const selected = await pickSaveFile(filename, ext);
+    if (selected) {
+      setOutputPath(selected);
+    }
+  };
 
   const handleStartExport = async () => {
     setIsExporting(true);
@@ -170,12 +180,22 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           {/* Output Path Input */}
           <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-800">
             <label className="font-semibold text-slate-300">3. Vị trí lưu file:</label>
-            <input
-              type="text"
-              value={outputPath}
-              onChange={(e) => setOutputPath(e.target.value)}
-              className="bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-blue-500"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={outputPath}
+                onChange={(e) => setOutputPath(e.target.value)}
+                className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-blue-500"
+              />
+              <button
+                type="button"
+                onClick={handleBrowseOutputPath}
+                className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-[11px] text-slate-300 transition shrink-0"
+              >
+                <Folder className="w-3.5 h-3.5 text-blue-400" />
+                <span>Duyệt...</span>
+              </button>
+            </div>
           </div>
 
           {/* Result or Error Banner */}

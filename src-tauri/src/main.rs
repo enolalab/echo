@@ -14,7 +14,9 @@ fn main() {
             start_pipeline,
             cancel_pipeline,
             export_subtitles,
-            open_in_file_manager
+            open_in_file_manager,
+            pick_video_file,
+            pick_save_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

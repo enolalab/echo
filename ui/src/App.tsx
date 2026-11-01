@@ -11,6 +11,7 @@ import {
   cancelPipeline,
   exportSubtitles,
   openInFileManager,
+  pickVideoFile,
   isTauri,
 } from './lib/ipc';
 import type {
@@ -82,15 +83,27 @@ export default function App() {
     };
   }, []);
 
-  const handleSelectVideo = () => {
-    // Hidden file input trigger
+  const handleSelectVideo = async () => {
+    if (isTauri()) {
+      try {
+        const selected = await pickVideoFile();
+        if (selected) {
+          setVideoPath(selected);
+        }
+        return;
+      } catch (err) {
+        console.error('Failed to open native file picker:', err);
+      }
+    }
+
+    // Hidden file input trigger (browser fallback)
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'video/*,audio/*';
     input.onchange = (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (file) {
-        // In Tauri webview: file.path exists; in browser: create object URL
+        // In browser: create object URL
         const fullPath = (file as any).path || URL.createObjectURL(file);
         setVideoPath(fullPath);
       }

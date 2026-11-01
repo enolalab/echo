@@ -98,3 +98,17 @@ export async function openInFileManager(path: string): Promise<void> {
   }
   return await invoke('open_in_file_manager', { path });
 }
+
+export async function pickVideoFile(): Promise<string | null> {
+  if (!isTauri()) {
+    return null;
+  }
+  return await invoke<string | null>('pick_video_file');
+}
+
+export async function pickSaveFile(defaultName: string, extension: string): Promise<string | null> {
+  if (!isTauri()) {
+    return null;
+  }
+  return await invoke<string | null>('pick_save_file', { defaultName, extension });
+}

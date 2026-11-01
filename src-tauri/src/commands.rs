@@ -396,3 +396,29 @@ pub async fn open_in_file_manager(path: String) -> Result<(), String> {
 
     Ok(())
 }
+
+#[tauri::command]
+pub async fn pick_video_file() -> Result<Option<String>, String> {
+    let file = rfd::AsyncFileDialog::new()
+        .add_filter(
+            "Video & Audio",
+            &["mp4", "mkv", "avi", "mov", "flv", "wmv", "webm", "mp3", "wav", "m4a", "flac", "ogg"],
+        )
+        .set_title("Chọn tệp Video / Audio")
+        .pick_file()
+        .await;
+
+    Ok(file.map(|f| f.path().to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+pub async fn pick_save_file(default_name: String, extension: String) -> Result<Option<String>, String> {
+    let file = rfd::AsyncFileDialog::new()
+        .set_file_name(&default_name)
+        .add_filter(&extension, &[&extension])
+        .set_title("Chọn vị trí lưu tệp")
+        .save_file()
+        .await;
+
+    Ok(file.map(|f| f.path().to_string_lossy().to_string()))
+}
