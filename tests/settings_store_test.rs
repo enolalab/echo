@@ -103,8 +103,10 @@ fn first_profile_becomes_default_when_none() {
 fn general_and_stt_key() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = open(dir.path());
-    let mut g = GeneralSettings::default();
-    g.target_lang = "en".into();
+    let g = GeneralSettings {
+        target_lang: "en".into(),
+        ..Default::default()
+    };
     s.set_general(g.clone()).unwrap();
     assert_eq!(open(dir.path()).settings().general, g);
 

@@ -39,8 +39,10 @@ fn parse_ignores_extras_and_out_of_range() {
     assert_eq!(ok, vec!["First", "Second"]);
 }
 
+type SeenCalls = Arc<Mutex<Vec<(Option<String>, String)>>>;
+
 struct Recorder {
-    seen: Arc<Mutex<Vec<(Option<String>, String)>>>,
+    seen: SeenCalls,
     reply: Result<String, LlmError>,
 }
 

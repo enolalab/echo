@@ -21,6 +21,7 @@ use crate::types::{
     WhisperModelInfo,
 };
 
+#[allow(clippy::too_many_arguments)]
 fn emit_progress(
     app: &AppHandle,
     job_id: &str,
