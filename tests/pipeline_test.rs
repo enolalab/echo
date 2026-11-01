@@ -66,6 +66,25 @@ async fn translate_all_covers_every_batch() {
 }
 
 #[tokio::test]
+async fn test_translate_all_invokes_progress_callback() {
+    let mut s = many(45);
+    let mut recorded = Vec::new();
+    translate_all_with_progress(
+        &Prefix,
+        &mut s,
+        "en",
+        "vi",
+        Some(|done, total| {
+            recorded.push((done, total));
+        }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(recorded, vec![(20, 45), (40, 45), (45, 45)]);
+}
+
+#[tokio::test]
 async fn translate_all_retries_then_fails_loudly() {
     let mut s = many(3);
     translate_all(&Flaky(AtomicUsize::new(0)), &mut s, "en", "vi")

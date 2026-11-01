@@ -143,6 +143,19 @@ pub async fn translate_all(
     src: &str,
     tgt: &str,
 ) -> anyhow::Result<()> {
+    translate_all_with_progress(t, segs, src, tgt, None::<fn(usize, usize)>).await
+}
+
+pub async fn translate_all_with_progress<F>(
+    t: &dyn Translator,
+    segs: &mut [SubtitleSegment],
+    src: &str,
+    tgt: &str,
+    mut on_progress: Option<F>,
+) -> anyhow::Result<()>
+where
+    F: FnMut(usize, usize) + Send,
+{
     if segs.is_empty() {
         return Ok(());
     }
@@ -153,6 +166,9 @@ pub async fn translate_all(
             .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} lines ({eta})")
             .unwrap_or_else(|_| ProgressStyle::default_bar()),
     );
+
+    let total_len = segs.len();
+    let mut done_len = 0;
 
     for chunk in segs.chunks_mut(BATCH_SIZE) {
         let start_line = chunk.first().map(|s| s.id).unwrap_or(1);
@@ -176,6 +192,10 @@ pub async fn translate_all(
                         seg.translated_text = Some(trans);
                     }
                     pb.inc(chunk.len() as u64);
+                    done_len += chunk.len();
+                    if let Some(ref mut cb) = on_progress {
+                        cb(done_len, total_len);
+                    }
                     success = true;
                     break;
                 }
