@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::skills::Skill;
+
 pub const SETTINGS_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -106,6 +108,10 @@ pub struct Settings {
     pub default_profile_id: Option<String>,
     #[serde(default)]
     pub general: GeneralSettings,
+    #[serde(default)]
+    pub skills: Vec<Skill>,
+    #[serde(default)]
+    pub default_skill_id: Option<String>,
 }
 
 impl Settings {
@@ -122,6 +128,8 @@ impl Settings {
             default_profile_id: Some(ollama.id.clone()),
             profiles: vec![ollama],
             general: GeneralSettings::default(),
+            skills: vec![],
+            default_skill_id: None,
         }
     }
 

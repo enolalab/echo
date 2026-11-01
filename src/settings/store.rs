@@ -4,6 +4,7 @@ use anyhow::{anyhow, Context};
 
 use super::model::{GeneralSettings, ProviderProfile, Settings};
 use super::secrets::{open_secret_store, profile_account, SecretStore, SecretsBackend, STT_ACCOUNT};
+use crate::skills::{self, io as skill_io, model::unique_name, Skill, NO_SKILL};
 
 pub fn default_config_dir() -> anyhow::Result<PathBuf> {
     Ok(dirs::config_dir()
@@ -159,5 +160,108 @@ impl SettingsStore {
                 anyhow!("Không tìm thấy profile '{q}'. Có: {}", names.join(", "))
             }),
         }
+    }
+
+    pub fn skills_all(&self) -> Vec<Skill> {
+        skills::presets()
+            .iter()
+            .cloned()
+            .chain(self.settings.skills.iter().cloned())
+            .collect()
+    }
+
+    pub fn find_skill(&self, q: &str) -> Option<Skill> {
+        let q = q.trim();
+        let all = self.skills_all();
+        all.iter().find(|s| s.id == q).cloned().or_else(|| {
+            let lower = q.to_lowercase();
+            all.into_iter().find(|s| s.name.trim().to_lowercase() == lower)
+        })
+    }
+
+    pub fn other_skills(&self, id: &str) -> Vec<Skill> {
+        self.skills_all().into_iter().filter(|s| s.id != id).collect()
+    }
+
+    fn skill_names(&self) -> Vec<String> {
+        self.skills_all().into_iter().map(|s| s.name).collect()
+    }
+
+    pub fn upsert_skill(&mut self, skill: Skill) -> anyhow::Result<Skill> {
+        let mut skill = skill.normalized();
+        if skill.is_builtin() {
+            anyhow::bail!("Không thể sửa skill có sẵn");
+        }
+        if skill.id.is_empty() {
+            skill.id = uuid::Uuid::new_v4().to_string();
+        }
+        skill.validate(&self.other_skills(&skill.id)).map_err(anyhow::Error::msg)?;
+        match self.settings.skills.iter_mut().find(|s| s.id == skill.id) {
+            Some(existing) => *existing = skill.clone(),
+            None => self.settings.skills.push(skill.clone()),
+        }
+        self.persist()?;
+        Ok(skill)
+    }
+
+    pub fn delete_skill(&mut self, id: &str) -> anyhow::Result<()> {
+        if id.starts_with(skills::BUILTIN_PREFIX) {
+            anyhow::bail!("Không thể xóa skill có sẵn");
+        }
+        self.settings.skills.retain(|s| s.id != id);
+        if self.settings.default_skill_id.as_deref() == Some(id) {
+            self.settings.default_skill_id = None;
+        }
+        self.persist()
+    }
+
+    pub fn duplicate_skill(&mut self, id: &str) -> anyhow::Result<Skill> {
+        let source = self
+            .skills_all()
+            .into_iter()
+            .find(|s| s.id == id)
+            .ok_or_else(|| anyhow!("Không tìm thấy skill"))?;
+        let name = unique_name(&format!("{} (bản sao)", source.name), &self.skill_names());
+        self.upsert_skill(Skill { id: String::new(), name, ..source })
+    }
+
+    pub fn set_default_skill(&mut self, id: Option<&str>) -> anyhow::Result<()> {
+        if let Some(id) = id {
+            if !self.skills_all().iter().any(|s| s.id == id) {
+                anyhow::bail!("Không tìm thấy skill");
+            }
+        }
+        self.settings.default_skill_id = id.map(String::from);
+        self.persist()
+    }
+
+    pub fn resolve_skill(&self, choice: Option<&str>) -> anyhow::Result<Option<Skill>> {
+        match choice {
+            None => Ok(self
+                .settings
+                .default_skill_id
+                .as_deref()
+                .and_then(|id| self.skills_all().into_iter().find(|s| s.id == id))),
+            Some(q) if q.trim() == NO_SKILL => Ok(None),
+            Some(q) => self
+                .find_skill(q)
+                .map(Some)
+                .ok_or_else(|| anyhow!("Không tìm thấy skill '{}'", q.trim())),
+        }
+    }
+
+    pub fn import_skill_json(&mut self, text: &str) -> anyhow::Result<Skill> {
+        let mut skill = skill_io::parse_import(text).map_err(anyhow::Error::msg)?;
+        skill.name = unique_name(&skill.name, &self.skill_names());
+        self.upsert_skill(skill)
+    }
+
+    pub fn export_skill_json(&self, id: &str) -> anyhow::Result<(String, String)> {
+        let skill = self
+            .skills_all()
+            .into_iter()
+            .find(|s| s.id == id)
+            .ok_or_else(|| anyhow!("Không tìm thấy skill"))?;
+        Ok((skill_io::safe_file_name(&skill.name), skill_io::export_json(&skill)))
     }
 }
