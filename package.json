@@ -1,0 +1,9 @@
+{
+  "name": "auto-subtitle-workspace",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix ui run dev",
+    "build": "npm --prefix ui run build",
+    "tauri": "npm --prefix ui run tauri"
+  }
+}
