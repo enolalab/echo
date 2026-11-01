@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use auto_subtitle::settings::{GeneralSettings, ProviderProfile, SecretsBackend};
+use auto_subtitle::skills::Skill;
 use auto_subtitle::subtitle::SubtitleSegment;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -29,6 +30,8 @@ pub struct PipelineConfig {
     pub skip_translate: bool,
     #[serde(default)]
     pub profile_id: Option<String>,
+    #[serde(default)]
+    pub skill_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -82,6 +85,9 @@ pub struct SettingsView {
     pub profiles: Vec<ProfileView>,
     pub default_profile_id: Option<String>,
     pub general: GeneralSettings,
+    pub presets: Vec<Skill>,
+    pub skills: Vec<Skill>,
+    pub default_skill_id: Option<String>,
     pub stt_has_key: bool,
     pub secrets_backend: SecretsBackend,
     pub load_warning: Option<String>,

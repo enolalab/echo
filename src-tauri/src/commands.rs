@@ -224,10 +224,10 @@ async fn run_pipeline(
         return Err(format!("Không tìm thấy file video: {}", input_video.display()));
     }
 
-    let (translator, stt_key): (Option<Box<dyn Translator>>, Option<String>) = {
+    let (translator, stt_key, skill_line): (Option<Box<dyn Translator>>, Option<String>, Option<String>) = {
         let store = settings.lock().map_err(|_| "Lỗi khóa cài đặt".to_string())?;
-        let translator = if config.skip_translate {
-            None
+        let (translator, skill_line) = if config.skip_translate {
+            (None, None)
         } else {
             let profile = store
                 .resolve_profile(config.profile_id.as_deref())
@@ -235,7 +235,11 @@ async fn run_pipeline(
                 .ok_or_else(|| "Chưa cấu hình provider dịch".to_string())?;
             let key = store.profile_key(&profile.id).map_err(|e| format!("{e:#}"))?;
             let client = build_chat_client(&profile, key).map_err(|e| e.user_message())?;
-            Some(Box::new(LlmTranslator::new(client, None)) as Box<dyn Translator>)
+            let skill = store
+                .resolve_skill(config.skill_id.as_deref())
+                .map_err(|e| format!("{e:#}"))?;
+            let line = crate::skill_commands::skill_log_line(skill.as_ref());
+            (Some(Box::new(LlmTranslator::new(client, skill)) as Box<dyn Translator>), Some(line))
         };
         let stt_key = if config.use_cloud_stt {
             Some(
@@ -247,8 +251,12 @@ async fn run_pipeline(
         } else {
             None
         };
-        (translator, stt_key)
+        (translator, stt_key, skill_line)
     };
+
+    if let Some(line) = skill_line {
+        let _ = app.emit("pipeline-log", format!("[{job_id}] {line}"));
+    }
 
     let app_config = get_app_config();
     let dm = DependencyManager::new(app_config);

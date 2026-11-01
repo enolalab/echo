@@ -6,7 +6,7 @@ use auto_subtitle::settings::{GeneralSettings, ProviderProfile, SettingsStore};
 use crate::state::AppState;
 use crate::types::{ProfileView, SettingsView};
 
-fn lock(state: &AppState) -> Result<std::sync::MutexGuard<'_, SettingsStore>, String> {
+pub(crate) fn lock(state: &AppState) -> Result<std::sync::MutexGuard<'_, SettingsStore>, String> {
     state.settings.lock().map_err(|_| "Lỗi khóa cài đặt".to_string())
 }
 
@@ -20,6 +20,9 @@ pub(crate) fn build_view(store: &mut SettingsStore) -> SettingsView {
             .collect(),
         default_profile_id: s.default_profile_id,
         general: s.general,
+        presets: auto_subtitle::skills::presets().to_vec(),
+        skills: s.skills,
+        default_skill_id: s.default_skill_id,
         stt_has_key: matches!(store.stt_key(), Ok(Some(_))),
         secrets_backend: store.backend(),
         load_warning: store.take_load_warning(),
@@ -163,5 +166,18 @@ mod tests {
         assert_eq!(resolve_key(&store, &p.id, Some("  ".into())).as_deref(), Some("stored"));
         assert_eq!(resolve_key(&store, &p.id, None).as_deref(), Some("stored"));
         assert_eq!(resolve_key(&store, "unknown", None), None);
+    }
+
+    #[test]
+    fn view_includes_presets_and_user_skills() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store =
+            SettingsStore::open(dir.path(), Box::new(MemoryStore::default()), SecretsBackend::Keyring).unwrap();
+        store.duplicate_skill("builtin:math").unwrap();
+        store.set_default_skill(Some("builtin:math")).unwrap();
+        let v = build_view(&mut store);
+        assert_eq!(v.presets.len(), 6);
+        assert_eq!(v.skills.len(), 1);
+        assert_eq!(v.default_skill_id.as_deref(), Some("builtin:math"));
     }
 }

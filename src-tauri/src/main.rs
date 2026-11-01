@@ -1,10 +1,12 @@
 pub mod commands;
 pub mod settings_commands;
+pub mod skill_commands;
 pub mod state;
 pub mod types;
 
 use commands::*;
 use settings_commands::*;
+use skill_commands::*;
 use state::AppState;
 
 fn main() {
@@ -30,7 +32,14 @@ fn main() {
             save_general,
             set_stt_key,
             test_profile,
-            list_profile_models
+            list_profile_models,
+            save_skill,
+            delete_skill,
+            duplicate_skill,
+            set_default_skill,
+            import_skill,
+            export_skill,
+            try_skill
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
