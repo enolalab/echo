@@ -3,6 +3,14 @@ name = "auto-subtitle"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "auto_subtitle"
+path = "src/lib.rs"
+
+[[bin]]
+name = "auto-subtitle"
+path = "src/main.rs"
+
 [features]
 default = []
 cuda = ["whisper-rs/cuda"]
