@@ -3,11 +3,13 @@ pub mod settings_commands;
 pub mod skill_commands;
 pub mod state;
 pub mod types;
+pub mod youtube_commands;
 
 use commands::*;
 use settings_commands::*;
 use skill_commands::*;
 use state::AppState;
+use youtube_commands::*;
 
 fn main() {
     let settings = auto_subtitle::settings::SettingsStore::open_default()
@@ -39,7 +41,12 @@ fn main() {
             set_default_skill,
             import_skill,
             export_skill,
-            try_skill
+            try_skill,
+            check_yt_dlp_status,
+            ensure_yt_dlp,
+            inspect_youtube_url,
+            download_youtube_items,
+            cancel_youtube_download
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

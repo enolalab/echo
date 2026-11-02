@@ -199,6 +199,7 @@ impl YtDlpManager {
             .arg(&item.webpage_url)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .kill_on_drop(true)
             .spawn()
             .context("Failed to spawn yt-dlp download process")?;
 
