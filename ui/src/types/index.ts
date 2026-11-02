@@ -33,6 +33,15 @@ export interface PipelineConfig {
 
 export type ExportMode = 'hardsub' | 'softsub' | 'subs_only';
 export type StylePreset = 'classic_white' | 'youtube_yellow' | 'netflix_modern' | 'bilingual_highlight';
+export type TtsEngineKind = 'local' | 'api';
+
+export interface DubOptions {
+  enabled: boolean;
+  engine: TtsEngineKind;
+  voice?: string | null;
+  model?: string | null;
+  original_volume: number;
+}
 
 export interface ExportRequest {
   video_path: string;
@@ -41,6 +50,21 @@ export interface ExportRequest {
   bilingual: boolean;
   style_preset: StylePreset;
   segments: SubtitleSegment[];
+  dub?: DubOptions | null;
+  job_id?: string | null;
+}
+
+export interface PiperStatus {
+  installed: boolean;
+  path: string | null;
+  version: string | null;
+}
+
+export interface ExportProgress {
+  job_id: string | null;
+  stage: string;
+  index: number;
+  total: number;
 }
 
 export interface PipelineStageEvent {
@@ -99,6 +123,10 @@ export interface GeneralSettings {
   style_preset: StylePreset;
   use_cloud_stt: boolean;
   download_dir?: string | null;
+  tts_engine: TtsEngineKind;
+  tts_voice?: string | null;
+  tts_model?: string | null;
+  dub_orig_volume: number;
 }
 
 export interface SettingsView {

@@ -13,6 +13,7 @@ import type {
   Skill,
   TrySkillResult,
   YtDlpStatus,
+  PiperStatus,
   YoutubeDownloadRequest,
   YoutubeInspectResult,
   YoutubeProgressPayload,
@@ -196,6 +197,10 @@ let mockSettings: SettingsView = {
     bilingual: true,
     style_preset: 'youtube_yellow',
     use_cloud_stt: false,
+    tts_engine: 'local',
+    tts_voice: null,
+    tts_model: null,
+    dub_orig_volume: 0.15,
   },
   presets: [
     { id: 'builtin:math', name: 'Toán học', description: 'Mock preset', system_prompt: 'Math {target_lang}', glossary: [] },
@@ -353,6 +358,21 @@ export async function ensureYtDlp(): Promise<YtDlpStatus> {
     return { installed: true, path: '/mock/bin/yt-dlp', version: 'mock' };
   }
   return await invoke<YtDlpStatus>('ensure_yt_dlp');
+}
+
+export async function checkPiperStatus(): Promise<PiperStatus> {
+  if (!isTauri()) {
+    return { installed: true, path: '/mock/bin/piper/piper', version: 'mock' };
+  }
+  return await invoke<PiperStatus>('check_piper_status');
+}
+
+export async function ensurePiper(): Promise<PiperStatus> {
+  if (!isTauri()) {
+    await new Promise((r) => setTimeout(r, 500));
+    return { installed: true, path: '/mock/bin/piper/piper', version: 'mock' };
+  }
+  return await invoke<PiperStatus>('ensure_piper');
 }
 
 export async function inspectYoutubeUrl(url: string): Promise<YoutubeInspectResult> {

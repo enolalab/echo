@@ -12,9 +12,18 @@ import {
   Copy,
   Check,
   AlertCircle,
+  Mic,
 } from 'lucide-react';
-import type { ExportMode, StylePreset, ExportRequest, SubtitleSegment } from '../types';
+import type {
+  ExportMode,
+  StylePreset,
+  ExportRequest,
+  SubtitleSegment,
+  DubOptions,
+  ExportProgress,
+} from '../types';
 import { pickSaveFile } from '../lib/ipc';
+import { listen } from '@tauri-apps/api/event';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -24,6 +33,7 @@ interface ExportModalProps {
   segments: SubtitleSegment[];
   initialPreset: StylePreset;
   initialBilingual: boolean;
+  dubDefaults?: Omit<DubOptions, 'enabled'>;
   onExport: (req: ExportRequest) => Promise<string>;
   onOpenFolder: (path: string) => void;
   onExported?: (outputPath: string | null) => void;
@@ -70,6 +80,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   segments,
   initialPreset,
   initialBilingual,
+  dubDefaults,
   onExport,
   onOpenFolder,
   onExported,
@@ -78,6 +89,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [outputPath, setOutputPath] = useState(defaultOutputPath);
   const [stylePreset, setStylePreset] = useState<StylePreset>(initialPreset);
   const [bilingual, setBilingual] = useState(initialBilingual);
+  const [dubEnabled, setDubEnabled] = useState(false);
+  const [dubProgress, setDubProgress] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportResult, setExportResult] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -89,6 +102,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       setExportResult(null);
       setErrorMsg(null);
       setCopied(false);
+      setDubProgress(null);
     }
   }, [isOpen, defaultOutputPath]);
 
@@ -107,6 +121,22 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     setIsExporting(true);
     setExportResult(null);
     setErrorMsg(null);
+    setDubProgress(null);
+
+    const jobId = dubEnabled ? `export-${Date.now()}` : null;
+    let unlisten: (() => void) | null = null;
+    if (jobId) {
+      try {
+        unlisten = await listen<ExportProgress>('export-progress', (e) => {
+          const p = e.payload;
+          if (p.stage === 'dubbing' && p.job_id === jobId) {
+            setDubProgress(`Đang lồng tiếng ${p.index}/${p.total}`);
+          }
+        });
+      } catch {
+        // Not inside Tauri (browser/test) — progress events unavailable
+      }
+    }
 
     try {
       const result = await onExport({
@@ -116,12 +146,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         bilingual,
         style_preset: stylePreset,
         segments,
+        dub: dubEnabled && dubDefaults ? { enabled: true, ...dubDefaults } : null,
+        job_id: jobId,
       });
       setExportResult(result);
       onExported?.(mode === 'subs_only' ? null : outputPath);
     } catch (err) {
       setErrorMsg(String(err));
     } finally {
+      unlisten?.();
+      setDubProgress(null);
       setIsExporting(false);
     }
   };
@@ -251,6 +285,41 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
           </div>
 
+          {/* 2b. Voice dubbing toggle */}
+          {dubDefaults && (
+            <button
+              type="button"
+              onClick={() => setDubEnabled(!dubEnabled)}
+              className={`w-full px-4 py-3 rounded-xl border flex items-center justify-between transition-colors ${
+                dubEnabled
+                  ? 'border-emerald-500/60 bg-emerald-600/10 text-slate-200'
+                  : 'border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <span className="flex items-center gap-2.5">
+                <Mic className={`w-4 h-4 ${dubEnabled ? 'text-emerald-400' : 'text-slate-500'}`} />
+                <span className="flex flex-col items-start gap-0.5">
+                  <span className="text-xs font-semibold">Lồng tiếng theo phụ đề đã dịch</span>
+                  <span className="text-[10px] text-slate-500">
+                    TTS {dubDefaults.engine === 'local' ? 'Piper (offline)' : 'API'} · giọng gốc nền{' '}
+                    {Math.round(dubDefaults.original_volume * 100)}%
+                  </span>
+                </span>
+              </span>
+              <span
+                className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${
+                  dubEnabled ? 'bg-emerald-600' : 'bg-slate-700'
+                }`}
+              >
+                <span
+                  className={`absolute top-[3px] left-[3px] w-[14px] h-[14px] rounded-full bg-white shadow transition-transform ${
+                    dubEnabled ? 'translate-x-[16px]' : ''
+                  }`}
+                />
+              </span>
+            </button>
+          )}
+
           {/* 3. Output Destination */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
@@ -335,6 +404,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
         {/* Footer Actions */}
         <div className="px-6 py-4 bg-slate-950/40 border-t border-slate-800/80 flex items-center justify-end gap-3">
+          {dubProgress && (
+            <span className="mr-auto flex items-center gap-1.5 text-[11px] text-emerald-300">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              {dubProgress}
+            </span>
+          )}
           <button
             type="button"
             onClick={onClose}

@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { X, RefreshCw, AlertTriangle } from 'lucide-react';
+import { X, RefreshCw, AlertTriangle, Mic, Loader2 } from 'lucide-react';
 import type {
   ConnectionTest,
   GeneralSettings,
+  PiperStatus,
   ProfileView,
   ProviderProfile,
   SettingsView,
   StylePreset,
+  TtsEngineKind,
   WhisperModelInfo,
 } from '../types';
 import * as ipc from '../lib/ipc';
@@ -75,6 +77,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sttKey, setSttKeyInput] = useState('');
+  const [piper, setPiper] = useState<PiperStatus | null>(null);
+  const [piperBusy, setPiperBusy] = useState(false);
 
   const selected = settings.profiles.find((p) => p.id === selectedId) ?? null;
   const isNew = selectedId === null;
@@ -100,6 +104,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (isOpen && selected) refreshModels(toProfile(selected));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, selectedId]);
+
+  useEffect(() => {
+    if (isOpen && tab === 'general' && general.tts_engine === 'local') {
+      ipc.checkPiperStatus().then(setPiper).catch(() => setPiper(null));
+    }
+  }, [isOpen, tab, general.tts_engine]);
 
   if (!isOpen) return null;
 
@@ -449,6 +459,92 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <option value="bilingual_highlight">Bilingual Highlight</option>
               </select>
             </label>
+
+            <div className="flex flex-col gap-2 rounded border border-slate-700/60 bg-slate-900/40 p-3">
+              <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                <Mic className="w-3.5 h-3.5" /> Lồng tiếng (TTS)
+              </span>
+              <label className="flex flex-col gap-1">
+                <span>Engine TTS</span>
+                <select
+                  aria-label="Engine TTS"
+                  value={general.tts_engine}
+                  onChange={(e) => patchGeneral({ tts_engine: e.target.value as TtsEngineKind })}
+                  className={inputCls}
+                >
+                  <option value="local">Piper (chạy offline)</option>
+                  <option value="api">API (OpenAI-compatible)</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span>
+                  Giọng đọc
+                  {general.tts_engine === 'local' ? ' (để trống = tự chọn theo ngôn ngữ)' : ''}
+                </span>
+                <input
+                  aria-label="Giọng đọc TTS"
+                  value={general.tts_voice ?? ''}
+                  placeholder={general.tts_engine === 'local' ? 'vi_VN-vais1000-medium' : 'alloy'}
+                  onChange={(e) => patchGeneral({ tts_voice: e.target.value.trim() || null })}
+                  className={inputCls}
+                />
+              </label>
+              {general.tts_engine === 'api' && (
+                <label className="flex flex-col gap-1">
+                  <span>Model TTS</span>
+                  <input
+                    aria-label="Model TTS"
+                    value={general.tts_model ?? ''}
+                    placeholder="tts-1"
+                    onChange={(e) => patchGeneral({ tts_model: e.target.value.trim() || null })}
+                    className={inputCls}
+                  />
+                </label>
+              )}
+              <label className="flex flex-col gap-1">
+                <span>Âm lượng giọng gốc nền: {Math.round(general.dub_orig_volume * 100)}%</span>
+                <input
+                  type="range"
+                  aria-label="Âm lượng giọng gốc nền"
+                  min={0}
+                  max={50}
+                  step={5}
+                  value={Math.round(general.dub_orig_volume * 100)}
+                  onChange={(e) => patchGeneral({ dub_orig_volume: Number(e.target.value) / 100 })}
+                />
+              </label>
+              {general.tts_engine === 'local' && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-400">
+                    {piper === null
+                      ? 'Đang kiểm tra Piper...'
+                      : piper.installed
+                        ? `Piper đã cài${piper.version ? ` (${piper.version})` : ''}`
+                        : 'Piper chưa cài — sẽ tự tải khi lồng tiếng lần đầu'}
+                  </span>
+                  {piper && !piper.installed && (
+                    <button
+                      type="button"
+                      disabled={piperBusy}
+                      onClick={async () => {
+                        setPiperBusy(true);
+                        try {
+                          setPiper(await ipc.ensurePiper());
+                        } catch (e) {
+                          setError(String(e));
+                        } finally {
+                          setPiperBusy(false);
+                        }
+                      }}
+                      className="px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 shrink-0 flex items-center gap-1"
+                    >
+                      {piperBusy && <Loader2 className="w-3 h-3 animate-spin" />}
+                      {piperBusy ? 'Đang tải...' : 'Tải Piper'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
             {error && <div className="text-rose-400">{error}</div>}
           </div>
         )}
