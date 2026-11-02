@@ -14,7 +14,7 @@ Add an optional dubbing stage to the pipeline: after translation, synthesize eac
 
 ## 1. Pipeline Integration & Data Flow
 
-The dub stage runs after translation (segments carry translated text) and before output rendering:
+The dub stage runs after translation (segments carry translated text) and before output rendering. **Two call sites** share the `src/dub.rs` functions: `pipeline::run` for the CLI, and the inline pipeline in `src-tauri/src/commands.rs` for the GUI (which reimplements the pipeline rather than calling `pipeline::run`, and additionally needs `dubbing` progress emission + `cancel_rx` checks).
 
 ```
 Translated SubtitleSegments
@@ -46,16 +46,18 @@ pub trait TtsEngine: Send + Sync {
 ```
 
 - `src/tts/mod.rs`: trait + `build_engine(cli) -> Box<dyn TtsEngine>`.
-- `src/tts/piper.rs` (`PiperTts`): spawns `piper` binary per segment — `echo "<text>" | piper -m <voice>.onnx -c <voice>.onnx.json -f out.wav`. Piper synthesizes a sentence in ~50–200 ms on CPU, so per-segment spawn overhead is acceptable and gives natural per-segment progress reporting.
-- `src/tts/api.rs` (`ApiTts`): `POST {api_base_url}/audio/speech` with `{model, voice, input, response_format: "wav"}` and `Authorization: Bearer <api-key>`. Reuses existing `--api-key` / `--api-base-url` flags.
+- `src/tts/piper.rs` (`PiperTts`): writes normalized segment text to the process's stdin and spawns `piper -m <voice>.onnx -c <voice>.onnx.json -f out.wav` per segment. Piper synthesizes a sentence in ~50–200 ms on CPU; model+espeak data reload per spawn adds ~0.3–1 s/segment — accepted in v1 for per-segment progress fidelity (piper batch stdin mode is a noted future optimization).
+- `src/tts/api.rs` (`ApiTts`): `POST {api_base_url}/audio/speech` with `{model, voice, input, response_format: "wav"}` and `Authorization: Bearer <api-key>`. Reuses `--api-key` / `--api-base-url`; requires a provider that implements `/audio/speech` (errors early if no API key is configured). Returned bytes are normalized via ffmpeg regardless of codec, so providers that only return mp3 still work.
+
+**Text normalization before `synthesize`:** flatten newlines to spaces and strip ASS override tags (`{...}`). Piper treats each stdin line as a separate utterance — without this, one segment could produce multiple wavs and break the clip↔segment mapping.
 
 ### 2.2 Piper binary & voice model management
 
-Follows the existing ffmpeg/whisper/yt-dlp auto-download convention:
+Follows the existing ffmpeg/whisper/yt-dlp auto-download convention, **with one difference**: Piper is not a single static binary — its release is a bundle containing the `piper` executable plus shared libraries (`lib/`) and `espeak-ng-data/` which must stay co-located. Extraction therefore preserves the directory layout under `bin/piper/` (e.g. `bin/piper/piper`), unlike the single-file ffmpeg copy.
 
-- Binary lookup: system `PATH` → app data dir (`~/.local/share/auto-subtitle/bin/piper` on Linux, equivalents on macOS/Windows; CLI cache dir `~/.cache/auto-subtitle/bin/piper`).
-- Download from GitHub releases (`rhasspy/piper`): `piper_linux_x86_64.tar.gz`, `piper_macos_{x64,aarch64}.tar.gz`, `piper_windows_amd64.zip`; `chmod +x` on Unix.
-- Voice models stored under `tts/` in the same root. v1 ships a small built-in catalog:
+- Bundle lookup: system `PATH` (`which piper`) → `bin/piper/piper` in the app data dir (`~/.local/share/auto-subtitle/`) or CLI cache dir (`~/.cache/auto-subtitle/`).
+- Download from GitHub releases (`rhasspy/piper`): `piper_linux_x86_64.tar.gz`, `piper_macos_{x64,aarch64}.tar.gz`, `piper_windows_amd64.zip`; extract preserving layout, `chmod +x` on Unix, verify with `piper --version`.
+- Voice models are separate downloads stored under `tts/` in the same root. v1 ships a small built-in catalog:
 
 | Voice ID | Language | HuggingFace path (`rhasspy/piper-voices`) | Quality |
 |---|---|---|---|
@@ -77,7 +79,9 @@ Each voice requires both `<id>.onnx` and `<id>.onnx.json`. `--tts-voice` accepts
 
 ```text
 slot(i)   = seg[i].end - seg[i].start
-gap(i)    = seg[i+1].start - seg[i].end     (last segment: video_end - seg.end)
+gap(i)    = seg[i+1].start - seg[i].end
+gap(last) = video_end - seg.end             (video_end = `ffmpeg -i` stderr "Duration:" parse;
+                                             if unavailable → gap = 0, degrades to atempo path)
 budget(i) = slot(i) + min(gap(i) * 0.5, 2.0s)
 MAX_TEMPO = 1.5
 
@@ -104,7 +108,7 @@ ffmpeg -i <video> -i dubbed.wav \
   -map 0:v -map "[aout]" -c:v copy -c:a aac <out>
 ```
 
-- `hardsub`: add `-vf ass=<styled.ass>` to the same pass (single encode).
+- `hardsub`: same pass, but the filter graph is a **single `-filter_complex`** containing both chains — `"[0:v]ass=<styled.ass>[v];[0:a]volume=...[a0];[1:a]apad[a1];[a0][a1]amix...[aout]"` with `-map "[v]" -map "[aout]"` (avoids `-vf`/`-filter_complex` mixing ambiguity).
 - `softsub`: keep existing `-map`/`-c:s` subtitle args alongside `-map "[aout]"`.
 - Video without an audio stream (e.g. `--sub` input on a silent file): skip `amix`, map `dubbed.wav` directly.
 
@@ -114,11 +118,13 @@ ffmpeg -i <video> -i dubbed.wav \
 |---|---|---|
 | `--dub` | `false` | Enable voice dubbing of translated subtitles. |
 | `--tts-engine <local\|api>` | `local` | `local` = Piper binary, `api` = OpenAI-compatible `/audio/speech`. |
-| `--tts-voice <id-or-path>` | `vi_VN-vais1000-medium` (local) / `alloy` (api) | Voice catalog ID, API voice name, or path to `.onnx`. |
+| `--tts-voice <id-or-path>` | resolved from `--target-lang` (see below) / `alloy` (api) | Voice catalog ID, API voice name, or path to `.onnx`. |
 | `--tts-model <name>` | `tts-1` | TTS model for `api` engine. |
 | `--dub-orig-volume <0.0-1.0>` | `0.15` | Volume of the original audio under the dub. |
 
 `--keep-temp` already preserves `dubbed.wav` and per-segment clips for debugging.
+
+**Default voice resolution (local engine):** first catalog entry whose voice-ID prefix matches `--target-lang` (e.g. `vi` → `vi_VN-vais1000-medium`, `en` → `en_US-lessac-medium`). If no catalog voice matches the target language → error telling the user to pass `--tts-voice` (catalog ID or `.onnx` path) or `--tts-engine api`. This avoids e.g. a Vietnamese voice reading English text when `--target-lang en`.
 
 ## 6. GUI (Echo Studio)
 
@@ -134,8 +140,8 @@ New **TTS / Lồng tiếng** section:
 
 ### 6.2 Job creation & progress
 
-- Job form gains a **"Lồng tiếng"** toggle; per-job params extend the existing job spec: `{ dub: bool, tts_engine, tts_voice, tts_model, dub_orig_volume }`.
-- Queue/progress events get a new stage `dubbing` with payload `{ index, total }` → label `"Đang lồng tiếng 12/84"`.
+- Job form gains a **"Lồng tiếng"** toggle; per-job params extend `PipelineConfig`: `{ dub: bool, tts_engine, tts_voice, tts_model, dub_orig_volume }`.
+- The dub stage inside the Tauri inline pipeline emits `pipeline-progress` events with stage `"dubbing"` (`current_step`/`total_steps` per segment → label `"Đang lồng tiếng 12/84"`) and checks `cancel_rx` between segments like the other stages.
 - Output player is unchanged: it already plays the rendered output file, which now carries the dubbed audio.
 
 ### 6.3 Tauri commands
@@ -165,8 +171,8 @@ pub struct PiperStatus {
     pub version: Option<String>,
 }
 
-// progress payload (extends job-progress union)
-{ "stage": "dubbing", "index": usize, "total": usize }
+// progress: existing PipelineProgressEvent, stage = "dubbing",
+// current_step/total_steps = per-segment index/total
 ```
 
 ## 8. Error Handling & Edge Cases
@@ -181,7 +187,7 @@ pub struct PiperStatus {
 | Empty/whitespace translated text | Skip synthesis for that segment. |
 | Segment with zero/negative slot | Still synthesize; budget degenerates to `min(gap*0.5, 2.0s)` + atempo path. |
 | Input video has no audio stream | Mux dubbed track directly without `amix`. |
-| `--skip-translate` + `--dub` | Dub the (untranslated) subtitle text as-is — flag combination is allowed. |
+| `--skip-translate` + `--dub` | Dub `original_text` as-is — flag combination is allowed. |
 
 ## 9. Testing Strategy
 
@@ -195,3 +201,11 @@ pub struct PiperStatus {
    - ffmpeg command builder tests: filter graph string contains `volume`, `atempo`, `amix`; `--sub`-input no-audio variant maps `dubbed.wav` directly.
 3. **Integration smoke**: tiny fixture video + feature-gated `MockTtsEngine` returning a generated sine WAV → assert output file has an AAC audio stream and expected duration.
 4. **Manual GUI verification** (repo has no UI test harness): toggle dub on a job, watch `dubbing` progress stage, confirm player output audio.
+
+## 10. Acceptance Criteria
+
+- `auto-subtitle -i video.mp4 --dub` produces a video whose audio track contains intelligible Vietnamese speech aligned with subtitle timings, original audio faintly audible underneath.
+- `--dub --mode softsub` and `--dub --mode subs-only` behave per the mode table (muxed track / emitted `.dub.wav`).
+- A segment whose TTS audio exceeds its slot is sped up ≤1.5x and never overlaps the next segment's start beyond the summed-overflow rule.
+- First run without Piper downloads binary bundle + default voice automatically; `--dub --tts-engine api` without API key fails fast with a clear message.
+- GUI: toggling "Lồng tiếng" on a job produces the same dubbed output as the CLI, shows `dubbing` progress, and cancel during dubbing aborts cleanly.
