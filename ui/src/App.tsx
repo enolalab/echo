@@ -613,6 +613,9 @@ export default function App() {
               }
             : undefined
         }
+        batchItems={jobs
+          .filter((j) => j.status === 'done' && j.segments.length > 0)
+          .map((j) => ({ videoPath: j.videoPath, segments: j.segments }))}
         onExport={exportSubtitles}
         onOpenFolder={openInFileManager}
         onExported={(path) => {

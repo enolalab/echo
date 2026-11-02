@@ -47,11 +47,32 @@ pub fn build_extract_mp3_command(ffmpeg: &Path, video: &Path, out_mp3: &Path) ->
 /// Runs ffmpeg with current_dir = ass_path.parent() and `-vf ass=<file_name>`.
 /// Err if ass file name is not [A-Za-z0-9._-]+ (we always use "subtitle.ass").
 /// video/output are made absolute with std::path::absolute.
+/// True when this ffmpeg binary ships the h264_nvenc hardware encoder.
+/// Runs `ffmpeg -encoders` once per call (~10-30ms).
+pub fn nvenc_available(ffmpeg: &Path) -> bool {
+    std::process::Command::new(ffmpeg)
+        .arg("-hide_banner")
+        .arg("-encoders")
+        .output()
+        .map(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).contains("h264_nvenc"))
+        .unwrap_or(false)
+}
+
+fn push_video_encoder(cmd: &mut Command, use_nvenc: bool) {
+    if use_nvenc {
+        // NVENC: quality-cq ~ x264 crf; p4 = balanced preset.
+        cmd.arg("-c:v").arg("h264_nvenc").arg("-preset").arg("p4").arg("-cq").arg("20");
+    } else {
+        cmd.arg("-c:v").arg("libx264").arg("-preset").arg("medium").arg("-crf").arg("20");
+    }
+}
+
 pub fn build_hardsub_command(
     ffmpeg: &Path,
     video: &Path,
     ass_path: &Path,
     output: &Path,
+    use_nvenc: bool,
 ) -> anyhow::Result<Command> {
     let file_name = ass_path
         .file_name()
@@ -88,21 +109,15 @@ pub fn build_hardsub_command(
         .arg("-map")
         .arg("0:a?")
         .arg("-vf")
-        .arg(format!("ass={file_name}"))
-        .arg("-c:v")
-        .arg("libx264")
-        .arg("-preset")
-        .arg("medium")
-        .arg("-crf")
-        .arg("20")
-        .arg("-c:a")
-        .arg("copy")
-        .arg(&abs_output);
+        .arg(format!("ass={file_name}"));
+    push_video_encoder(&mut cmd, use_nvenc);
+    cmd.arg("-c:a").arg("copy").arg(&abs_output);
     Ok(cmd)
 }
 
 /// hardsub + dub in one encode: single -filter_complex with ass burn + amix.
 /// has_audio=false → burn subs, use dubbed track as the only audio.
+#[allow(clippy::too_many_arguments)]
 pub fn build_hardsub_dub_command(
     ffmpeg: &Path,
     video: &Path,
@@ -111,6 +126,7 @@ pub fn build_hardsub_dub_command(
     output: &Path,
     orig_volume: f32,
     has_audio: bool,
+    use_nvenc: bool,
 ) -> anyhow::Result<Command> {
     let file_name = ass_path
         .file_name()
@@ -161,15 +177,8 @@ pub fn build_hardsub_dub_command(
     } else {
         cmd.arg("-map").arg("1:a");
     }
-    cmd.arg("-c:v")
-        .arg("libx264")
-        .arg("-preset")
-        .arg("medium")
-        .arg("-crf")
-        .arg("20")
-        .arg("-c:a")
-        .arg("aac")
-        .arg(&abs_output);
+    push_video_encoder(&mut cmd, use_nvenc);
+    cmd.arg("-c:a").arg("aac").arg(&abs_output);
     Ok(cmd)
 }
 
@@ -354,6 +363,7 @@ mod tests {
             Path::new("/o.mp4"),
             0.15,
             true,
+            false,
         )
         .unwrap();
         let args: Vec<String> = cmd

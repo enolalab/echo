@@ -41,6 +41,7 @@ fn hardsub_uses_workdir_and_safe_filter() {
         Path::new("My Clip: 1.mp4"),
         &ass,
         Path::new("out.mp4"),
+        false,
     )
     .unwrap();
     assert_eq!(cmd.get_current_dir(), Some(tmp.path()));
@@ -57,7 +58,8 @@ fn hardsub_rejects_unsafe_ass_name() {
         Path::new("ffmpeg"),
         Path::new("a.mp4"),
         Path::new("/tmp/a b:c.ass"),
-        Path::new("o.mp4")
+        Path::new("o.mp4"),
+        false
     )
     .is_err());
 }

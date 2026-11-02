@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X,
   Film,
@@ -35,6 +35,8 @@ interface ExportModalProps {
   initialPreset: StylePreset;
   initialBilingual: boolean;
   dubDefaults?: Omit<DubOptions, 'enabled'>;
+  /** Other finished jobs eligible for batch export (deduped vs current video). */
+  batchItems?: { videoPath: string; segments: SubtitleSegment[] }[];
   onExport: (req: ExportRequest) => Promise<string>;
   onOpenFolder: (path: string) => void;
   onExported?: (outputPath: string | null) => void;
@@ -82,6 +84,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   initialPreset,
   initialBilingual,
   dubDefaults,
+  batchItems,
   onExport,
   onOpenFolder,
   onExported,
@@ -93,6 +96,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [dubEnabled, setDubEnabled] = useState(!!dubDefaults);
   const [exportStage, setExportStage] = useState<'idle' | 'dubbing' | 'rendering'>('idle');
   const [dubCount, setDubCount] = useState<{ index: number; total: number } | null>(null);
+  const [batchMode, setBatchMode] = useState(false);
+  const [fileProgress, setFileProgress] = useState<{ index: number; total: number; name: string } | null>(null);
+  const jobIdRef = useRef<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportResult, setExportResult] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -107,8 +113,26 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       setExportStage('idle');
       setDubCount(null);
       setDubEnabled(!!dubDefaults);
+      setFileProgress(null);
+      setBatchMode(false);
     }
   }, [isOpen, defaultOutputPath, dubDefaults]);
+
+  const allItems = useMemo(() => {
+    const seen = new Set<string>();
+    const list: { videoPath: string; segments: SubtitleSegment[] }[] = [];
+    if (segments.length > 0 && videoPath) {
+      seen.add(videoPath);
+      list.push({ videoPath, segments });
+    }
+    for (const b of batchItems ?? []) {
+      if (!seen.has(b.videoPath) && b.segments.length > 0) {
+        seen.add(b.videoPath);
+        list.push(b);
+      }
+    }
+    return list;
+  }, [videoPath, segments, batchItems]);
 
   if (!isOpen) return null;
 
@@ -121,19 +145,31 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
   };
 
+  const baseName = (p: string) => p.split(/[/\\]/).pop() ?? p;
+  const stemOf = (p: string) => baseName(p).replace(/\.[^.]+$/, '');
+  const dirOf = (p: string) => {
+    const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+    return i > 0 ? p.substring(0, i) : '.';
+  };
+  const extFor = (m: ExportMode) => (m === 'hardsub' ? 'mp4' : m === 'softsub' ? 'mkv' : 'srt');
+  const batchOutPath = (vp: string) =>
+    `${dirOf(outputPath)}/${stemOf(vp)}_subtitled.${extFor(mode)}`;
+
   const handleStartExport = async () => {
+    const dubActive = dubEnabled && !!dubDefaults;
+    const items = batchMode && allItems.length > 1 ? allItems : [{ videoPath, segments }];
+
     setIsExporting(true);
     setExportResult(null);
     setErrorMsg(null);
-    setExportStage(dubEnabled ? 'dubbing' : 'rendering');
+    setExportStage(dubActive ? 'dubbing' : 'rendering');
     setDubCount(null);
 
-    const jobId = `export-${Date.now()}`;
     // Fire-and-forget: don't block onExport on listener registration —
     // outside Tauri (browser/test) this promise may never settle.
     const unlistenPromise = listen<ExportProgress>('export-progress', (e) => {
       const p = e.payload;
-      if (p.job_id !== jobId) return;
+      if (p.job_id !== jobIdRef.current) return;
       if (p.stage === 'dubbing') {
         setExportStage('dubbing');
         setDubCount({ index: p.index, total: p.total });
@@ -142,25 +178,58 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       }
     }).catch(() => null);
 
+    let okCount = 0;
+    const failures: string[] = [];
+    let lastResult: string | null = null;
+
     try {
-      const result = await onExport({
-        video_path: videoPath,
-        output_path: outputPath,
-        mode,
-        bilingual,
-        style_preset: stylePreset,
-        segments,
-        dub: dubEnabled && dubDefaults ? { enabled: true, ...dubDefaults } : null,
-        job_id: jobId,
-      });
-      setExportResult(result);
-      onExported?.(mode === 'subs_only' ? null : outputPath);
-    } catch (err) {
-      setErrorMsg(String(err));
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        const jobId = `export-${Date.now()}-${i}`;
+        jobIdRef.current = jobId;
+        setFileProgress({ index: i + 1, total: items.length, name: baseName(it.videoPath) });
+        setExportStage(dubActive ? 'dubbing' : 'rendering');
+        setDubCount(null);
+        const outPath = items.length > 1 ? batchOutPath(it.videoPath) : outputPath;
+
+        try {
+          lastResult = await onExport({
+            video_path: it.videoPath,
+            output_path: outPath,
+            mode,
+            bilingual,
+            style_preset: stylePreset,
+            segments: it.segments,
+            dub: dubActive ? { enabled: true, ...dubDefaults } : null,
+            job_id: jobId,
+          });
+          okCount++;
+        } catch (err) {
+          failures.push(`${baseName(it.videoPath)}: ${String(err)}`);
+        }
+      }
+
+      const outDir = dirOf(outputPath);
+      if (failures.length === items.length) {
+        setErrorMsg(`Xuất thất bại tất cả file:\n${failures.join('\n')}`);
+      } else {
+        setExportResult(
+          items.length > 1
+            ? `Đã xuất ${okCount}/${items.length} file vào ${outDir}`
+            : lastResult
+        );
+        if (failures.length > 0) {
+          setErrorMsg(`Một số file lỗi:\n${failures.join('\n')}`);
+        }
+        // Batch exports have no single playable output — leave player unchanged.
+        onExported?.(mode === 'subs_only' || items.length > 1 ? null : outputPath);
+      }
     } finally {
+      jobIdRef.current = null;
       void unlistenPromise.then((u) => u?.());
       setExportStage('idle');
       setDubCount(null);
+      setFileProgress(null);
       setIsExporting(false);
     }
   };
@@ -260,6 +329,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </div>
 
               {/* Status line */}
+              {fileProgress && fileProgress.total > 1 && (
+                <span className="text-[11px] text-slate-400 truncate">
+                  File {fileProgress.index}/{fileProgress.total}: {fileProgress.name}
+                </span>
+              )}
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-slate-300">
                   {exportStage === 'dubbing' && dubCount
@@ -279,6 +353,32 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
           )}
 
+          {/* 0. Batch selector — only when multiple exportable jobs exist */}
+          {allItems.length > 1 && (
+            <div className="flex rounded-lg border border-slate-700 overflow-hidden text-xs shrink-0">
+              <button
+                type="button"
+                disabled={isExporting}
+                onClick={() => setBatchMode(false)}
+                className={`flex-1 px-3 py-2 transition disabled:opacity-50 ${
+                  !batchMode ? 'bg-blue-600/20 text-blue-300 font-semibold' : 'bg-slate-900/60 text-slate-400 hover:bg-slate-800'
+                }`}
+              >
+                Video hiện tại
+              </button>
+              <button
+                type="button"
+                disabled={isExporting}
+                onClick={() => setBatchMode(true)}
+                className={`flex-1 px-3 py-2 transition disabled:opacity-50 ${
+                  batchMode ? 'bg-blue-600/20 text-blue-300 font-semibold' : 'bg-slate-900/60 text-slate-400 hover:bg-slate-800'
+                }`}
+              >
+                Tất cả {allItems.length} video
+              </button>
+            </div>
+          )}
+
           {/* 1. Export Mode Selection */}
           <div className="flex flex-col gap-2.5">
             <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
@@ -292,25 +392,28 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   <button
                     key={item.id}
                     type="button"
+                    disabled={isExporting}
                     onClick={() => setMode(item.id)}
-                    className={`relative p-3.5 rounded-xl border text-left flex flex-col gap-2 transition-all ${
+                    className={`p-3.5 min-w-0 rounded-xl border text-left flex flex-col gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                       isSelected
                         ? 'bg-blue-600/10 border-blue-500 text-white shadow-sm ring-1 ring-blue-500/30'
                         : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 hover:bg-slate-850 text-slate-400'
                     }`}
                   >
-                    {item.badge && (
-                      <span className="absolute top-2.5 right-2.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                        {item.badge}
-                      </span>
-                    )}
-                    <div className="flex items-center gap-2">
-                      <Icon className={`w-4 h-4 ${isSelected ? item.color : 'text-slate-400'}`} />
-                      <span className={`font-semibold text-xs ${isSelected ? 'text-white' : 'text-slate-300'}`}>
-                        {item.title}
-                      </span>
+                    <div className="flex items-start justify-between gap-1.5">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Icon className={`w-4 h-4 shrink-0 ${isSelected ? item.color : 'text-slate-400'}`} />
+                        <span className={`font-semibold text-xs truncate ${isSelected ? 'text-white' : 'text-slate-300'}`}>
+                          {item.title}
+                        </span>
+                      </div>
+                      {item.badge && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30 shrink-0">
+                          {item.badge}
+                        </span>
+                      )}
                     </div>
-                    <p className="text-[11px] leading-relaxed text-slate-400 pr-1">
+                    <p className="text-[11px] leading-relaxed text-slate-400 break-words">
                       {item.desc}
                     </p>
                   </button>
@@ -328,8 +431,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               <select
                 value={stylePreset}
                 onChange={(e) => setStylePreset(e.target.value as StylePreset)}
-                disabled={mode === 'subs_only'}
-                className="h-9 px-3 rounded-lg border border-slate-700 bg-slate-900 text-slate-200 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40 cursor-pointer disabled:opacity-40"
+                disabled={mode === 'subs_only' || isExporting}
+                className="h-9 px-3 rounded-lg border border-slate-700 bg-slate-900 text-slate-200 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <option value="youtube_yellow">YouTube Yellow</option>
                 <option value="classic_white">Classic White</option>
@@ -347,8 +450,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </label>
               <button
                 type="button"
+                disabled={isExporting}
                 onClick={() => setBilingual(!bilingual)}
-                className={`h-9 px-3 rounded-lg border flex items-center justify-between transition-colors ${
+                className={`h-9 px-3 rounded-lg border flex items-center justify-between transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                   bilingual
                     ? 'border-blue-500/60 bg-blue-600/10 text-slate-200'
                     : 'border-slate-700 bg-slate-900 text-slate-400 hover:border-slate-600'
@@ -374,8 +478,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           {dubDefaults && (
             <button
               type="button"
+              disabled={isExporting}
               onClick={() => setDubEnabled(!dubEnabled)}
-              className={`w-full px-4 py-3 rounded-xl border flex items-center justify-between transition-colors ${
+              className={`w-full px-4 py-3 rounded-xl border flex items-center justify-between transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                 dubEnabled
                   ? 'border-emerald-500/60 bg-emerald-600/10 text-slate-200'
                   : 'border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700'
@@ -415,18 +520,25 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 type="text"
                 value={outputPath}
                 onChange={(e) => setOutputPath(e.target.value)}
+                disabled={isExporting}
                 placeholder="/duong/dan/toi/file_xuat.mp4"
-                className="flex-1 h-9 bg-slate-900 border border-slate-700 rounded-lg px-3 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40"
+                className="flex-1 h-9 bg-slate-900 border border-slate-700 rounded-lg px-3 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40 disabled:opacity-50 disabled:cursor-not-allowed"
               />
               <button
                 type="button"
                 onClick={handleBrowseOutputPath}
-                className="h-9 px-3.5 flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-200 text-xs font-medium transition shrink-0"
+                disabled={isExporting}
+                className="h-9 px-3.5 flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-200 text-xs font-medium transition shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Folder className="w-3.5 h-3.5 text-blue-400" />
                 <span>Duyệt...</span>
               </button>
             </div>
+            {batchMode && allItems.length > 1 && (
+              <span className="text-[10px] text-slate-500">
+                Mỗi video → <span className="font-mono">{'<tên>'}_subtitled.{extFor(mode)}</span> trong cùng thư mục trên
+              </span>
+            )}
           </div>
 
           {/* Result Banner with clean multi-row layout */}

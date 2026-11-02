@@ -441,6 +441,7 @@ pub async fn run(cli: &Cli, deps: Deps<'_>) -> anyhow::Result<Report> {
             sp.set_message("Burning subtitles into video (hardsub)...");
             sp.enable_steady_tick(std::time::Duration::from_millis(100));
 
+            let use_nvenc = !cli.no_gpu && crate::media::nvenc_available(ffmpeg);
             let cmd = if let Some((ref dw, has_audio)) = dub_track {
                 crate::media::build_hardsub_dub_command(
                     ffmpeg,
@@ -450,9 +451,12 @@ pub async fn run(cli: &Cli, deps: Deps<'_>) -> anyhow::Result<Report> {
                     video_dest,
                     cli.dub_orig_volume,
                     has_audio,
+                    use_nvenc,
                 )?
             } else {
-                crate::media::build_hardsub_command(ffmpeg, &cli.input, &work_ass, video_dest)?
+                crate::media::build_hardsub_command(
+                    ffmpeg, &cli.input, &work_ass, video_dest, use_nvenc,
+                )?
             };
             crate::media::run_ffmpeg(cmd, "hardsub video burn")?;
             sp.finish_and_clear();
