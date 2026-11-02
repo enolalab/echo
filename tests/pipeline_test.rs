@@ -96,6 +96,37 @@ async fn translate_all_retries_then_fails_loudly() {
     assert!(format!("{err:#}").contains("lines 1–3"));
 }
 
+/// Mimics a small local model that drops lines when the batch is too big.
+struct DropsLinesAbove(usize);
+#[async_trait]
+impl Translator for DropsLinesAbove {
+    async fn translate_batch(&self, s: &[S], a: &str, b: &str) -> anyhow::Result<Vec<String>> {
+        if s.len() > self.0 {
+            anyhow::bail!("Missing translated line [{}] in translation response", self.0 + 1);
+        }
+        Prefix.translate_batch(s, a, b).await
+    }
+}
+
+#[tokio::test]
+async fn dropped_lines_split_batch_until_success() {
+    let mut s = many(20); // one 20-line batch: 20 > 5 fails, splits to 10/10, still fails, splits to 5
+    translate_all(&DropsLinesAbove(5), &mut s, "en", "vi")
+        .await
+        .unwrap();
+    assert!(s
+        .iter()
+        .all(|x| x.translated_text.as_deref() == Some(&format!("VI:{}", x.original_text)[..])));
+}
+
+#[tokio::test]
+async fn unsplittable_parse_failure_still_fails_loudly() {
+    let err = translate_all(&DropsLinesAbove(0), &mut many(2), "en", "vi")
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("lines 1–2"));
+}
+
 #[tokio::test]
 async fn subs_only_with_existing_subtitle_never_touches_input() {
     let t = tempfile::tempdir().unwrap();

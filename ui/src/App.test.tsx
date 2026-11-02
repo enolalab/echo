@@ -89,4 +89,30 @@ describe('App settings persistence', () => {
     fireEvent.dragOver(document);
     expect(screen.getByText('Thả để thêm vào hàng đợi')).toBeDefined();
   });
+
+  it('asks before re-adding a file already in the queue', async () => {
+    (URL as any).createObjectURL = vi.fn(() => 'blob:a.mp4');
+    render(<App />);
+    await waitFor(() => screen.getByDisplayValue('English (EN)'));
+
+    const file = new File(['x'], 'a.mp4', { type: 'video/mp4' });
+    const drop = () =>
+      fireEvent.drop(document, { dataTransfer: { files: [file] } });
+
+    drop();
+    await waitFor(() => expect(screen.getByText('Danh sách xử lý (1)')).toBeTruthy());
+
+    drop();
+    expect(await screen.findByText('1 file đã có trong hàng đợi')).toBeTruthy();
+
+    // skip -> still one job; dialog closes
+    fireEvent.click(screen.getByRole('button', { name: /bỏ qua file trùng/i }));
+    await waitFor(() => expect(screen.queryByText('1 file đã có trong hàng đợi')).toBeNull());
+    expect(screen.getByText('Danh sách xử lý (1)')).toBeTruthy();
+
+    // add again anyway -> two jobs
+    drop();
+    fireEvent.click(await screen.findByRole('button', { name: /vẫn thêm/i }));
+    await waitFor(() => expect(screen.getByText('Danh sách xử lý (2)')).toBeTruthy());
+  });
 });

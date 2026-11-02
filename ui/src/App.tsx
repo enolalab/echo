@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { FileVideo } from 'lucide-react';
 import { SplitPane } from './components/SplitPane';
@@ -73,9 +73,20 @@ export default function App() {
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isYoutubeModalOpen, setIsYoutubeModalOpen] = useState(false);
   const [outputDir, setOutputDir] = useState<string>('');
+  const [pendingAdd, setPendingAdd] = useState<{ paths: string[]; dupes: string[] } | null>(null);
 
   const jobsRef = useRef(jobs);
   jobsRef.current = jobs;
+
+  // YouTube video ids already in the queue (from "[id]" filename suffix)
+  const existingYoutubeIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const j of jobs) {
+      const m = j.videoPath.match(/\[([A-Za-z0-9_-]{11})\]\.[^./\\]+$/);
+      if (m) ids.add(m[1]);
+    }
+    return ids;
+  }, [jobs]);
 
   const updateJob = useCallback((id: string, patch: Partial<BatchJob>) => {
     setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
@@ -187,7 +198,7 @@ export default function App() {
     };
   }, []);
 
-  const addJobs = useCallback((paths: string[]) => {
+  const appendJobs = useCallback((paths: string[]) => {
     if (paths.length === 0) return;
     const newJobs: BatchJob[] = paths.map((p) => ({
       id: nextJobId(),
@@ -203,6 +214,30 @@ export default function App() {
     setCurrentTimeMs(0);
   }, []);
 
+  // Ask before re-adding files that are already in the queue
+  const addJobs = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) return;
+      const existing = new Set(jobsRef.current.map((j) => j.videoPath));
+      const dupes = paths.filter((p) => existing.has(p));
+      if (dupes.length > 0) {
+        setPendingAdd({ paths, dupes });
+        return;
+      }
+      appendJobs(paths);
+    },
+    [appendJobs]
+  );
+
+  const resolvePendingAdd = (addAll: boolean) => {
+    if (!pendingAdd) return;
+    const { paths, dupes } = pendingAdd;
+    setPendingAdd(null);
+    const fresh = addAll ? paths : paths.filter((p) => !dupes.includes(p));
+    if (fresh.length > 0) appendJobs(fresh);
+    else pushToast('Tất cả file đã có trong hàng đợi', 'info');
+  };
+
   const handleFilesDropped = useCallback(
     (paths: string[]) => {
       if (paths.length === 0) {
@@ -217,8 +252,14 @@ export default function App() {
 
   const handleYoutubeVideosDownloaded = useCallback(
     (paths: string[]) => {
+      const existing = new Set(jobsRef.current.map((j) => j.videoPath));
+      const freshCount = paths.filter((p) => !existing.has(p)).length;
       addJobs(paths);
-      pushToast(`Đã thêm ${paths.length} video từ YouTube vào hàng đợi`, 'success');
+      if (freshCount === paths.length) {
+        pushToast(`Đã thêm ${paths.length} video từ YouTube vào hàng đợi`, 'success');
+      } else {
+        pushToast(`${paths.length - freshCount}/${paths.length} video đã có trong hàng đợi`, 'info');
+      }
     },
     [addJobs, pushToast]
   );
@@ -566,6 +607,7 @@ export default function App() {
         onClose={() => setIsYoutubeModalOpen(false)}
         onVideosDownloaded={handleYoutubeVideosDownloaded}
         defaultDownloadDir={general.download_dir ?? undefined}
+        existingIds={existingYoutubeIds}
       />
 
       {/* 6. Settings Modal */}
@@ -579,6 +621,41 @@ export default function App() {
           onGeneralChange={setGeneral}
           whisperModels={systemInfo?.whisper_models ?? []}
         />
+      )}
+
+      {/* 6.5 Duplicate files prompt */}
+      {pendingAdd && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-4">
+            <div className="text-sm font-semibold text-slate-100 mb-1">
+              {pendingAdd.dupes.length} file đã có trong hàng đợi
+            </div>
+            <div className="text-xs text-slate-400 mb-3">
+              Bỏ qua các file trùng hay thêm lại vào danh sách xử lý?
+            </div>
+            <ul className="max-h-32 overflow-y-auto text-[11px] text-slate-500 mb-3 space-y-0.5">
+              {pendingAdd.dupes.map((p) => (
+                <li key={p} className="truncate" title={p}>
+                  {p.split(/[/\\]/).pop()}
+                </li>
+              ))}
+            </ul>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => resolvePendingAdd(false)}
+                className="h-8 px-3 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors"
+              >
+                Bỏ qua file trùng
+              </button>
+              <button
+                onClick={() => resolvePendingAdd(true)}
+                className="h-8 px-3 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+              >
+                Vẫn thêm
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 7. Drag overlay + Toasts */}

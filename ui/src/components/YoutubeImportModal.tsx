@@ -22,6 +22,7 @@ interface YoutubeImportModalProps {
   onClose: () => void;
   onVideosDownloaded: (savedPaths: string[]) => void;
   defaultDownloadDir?: string;
+  existingIds?: ReadonlySet<string>;
 }
 
 type Stage = 'input' | 'select' | 'downloading';
@@ -53,6 +54,7 @@ export const YoutubeImportModal: React.FC<YoutubeImportModalProps> = ({
   onClose,
   onVideosDownloaded,
   defaultDownloadDir,
+  existingIds,
 }) => {
   const [stage, setStage] = useState<Stage>('input');
   const [url, setUrl] = useState('');
@@ -64,6 +66,11 @@ export const YoutubeImportModal: React.FC<YoutubeImportModalProps> = ({
   const [progressMap, setProgressMap] = useState<Record<string, YoutubeProgressPayload>>({});
   const [downloadItems, setDownloadItems] = useState<YoutubeVideoItem[]>([]);
   const [downloadFinished, setDownloadFinished] = useState(false);
+  const [dupePrompt, setDupePrompt] = useState<{
+    chosen: YoutubeVideoItem[];
+    fresh: YoutubeVideoItem[];
+    dupes: YoutubeVideoItem[];
+  } | null>(null);
   const wasOpen = useRef(false);
 
   // Reset transient state each time the modal is reopened
@@ -73,6 +80,7 @@ export const YoutubeImportModal: React.FC<YoutubeImportModalProps> = ({
       setError(null);
       setProgressMap({});
       setDownloadFinished(false);
+      setDupePrompt(null);
     }
     wasOpen.current = isOpen;
   }, [isOpen]);
@@ -162,10 +170,7 @@ export const YoutubeImportModal: React.FC<YoutubeImportModalProps> = ({
     });
   };
 
-  const handleDownload = async () => {
-    if (!result) return;
-    const items = result.items.filter((i) => selected.has(i.id));
-    if (items.length === 0) return;
+  const startDownload = async (items: YoutubeVideoItem[]) => {
     setDownloadItems(items);
     setProgressMap({});
     setDownloadFinished(false);
@@ -180,6 +185,23 @@ export const YoutubeImportModal: React.FC<YoutubeImportModalProps> = ({
     } finally {
       setDownloadFinished(true);
     }
+  };
+
+  // Ask before re-downloading items that are already queued/processed
+  const handleDownload = async () => {
+    if (!result) return;
+    const chosen = result.items.filter((i) => selected.has(i.id));
+    if (chosen.length === 0) return;
+    const dupes = existingIds ? chosen.filter((i) => existingIds.has(i.id)) : [];
+    if (dupes.length > 0) {
+      setDupePrompt({
+        chosen,
+        dupes,
+        fresh: chosen.filter((i) => !existingIds!.has(i.id)),
+      });
+      return;
+    }
+    await startDownload(chosen);
   };
 
   const handleCancelDownload = () => {
@@ -382,11 +404,54 @@ export const YoutubeImportModal: React.FC<YoutubeImportModalProps> = ({
                       <div className="text-[10px] text-slate-500 truncate">
                         {item.channel_name ? `${item.channel_name} · ` : ''}
                         {formatDuration(item.duration_seconds)}
+                        {existingIds?.has(item.id) && (
+                          <span className="text-amber-400 font-medium"> · Đã có trong hàng đợi</span>
+                        )}
                       </div>
                     </div>
                   </label>
                 ))}
               </div>
+
+              {dupePrompt && (
+                <div className="flex flex-col gap-2 px-3 py-2.5 rounded-lg bg-amber-950/40 border border-amber-800/40 text-[11px] text-amber-200">
+                  <span>
+                    {dupePrompt.fresh.length > 0
+                      ? `${dupePrompt.dupes.length} video đã có trong hàng đợi. Bỏ qua chúng và chỉ tải ${dupePrompt.fresh.length} video còn lại?`
+                      : 'Tất cả video đã chọn đã có trong hàng đợi.'}
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {dupePrompt.fresh.length > 0 && (
+                      <button
+                        onClick={() => {
+                          const fresh = dupePrompt.fresh;
+                          setDupePrompt(null);
+                          startDownload(fresh);
+                        }}
+                        className="px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-500 text-white font-semibold transition-colors"
+                      >
+                        Bỏ qua — tải {dupePrompt.fresh.length} video
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        const chosen = dupePrompt.chosen;
+                        setDupePrompt(null);
+                        startDownload(chosen);
+                      }}
+                      className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors"
+                    >
+                      {dupePrompt.fresh.length > 0 ? 'Vẫn tải tất cả' : 'Vẫn tải lại'}
+                    </button>
+                    <button
+                      onClick={() => setDupePrompt(null)}
+                      className="px-2.5 py-1 rounded-md text-slate-400 hover:text-slate-200 transition-colors"
+                    >
+                      Hủy
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

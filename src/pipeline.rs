@@ -173,57 +173,86 @@ where
     for chunk in segs.chunks_mut(BATCH_SIZE) {
         let start_line = chunk.first().map(|s| s.id).unwrap_or(1);
         let end_line = chunk.last().map(|s| s.id).unwrap_or(start_line);
+        let chunk_len = chunk.len();
 
-        let mut last_err = None;
-        let mut success = false;
+        // Small local models often drop lines in large batches; on
+        // parse/validation failures keep halving the batch until it
+        // succeeds or a single line still fails.
+        let mut parts: Vec<&mut [SubtitleSegment]> = vec![chunk];
+        let mut chunk_err: Option<anyhow::Error> = None;
 
-        for attempt in 1..=MAX_ATTEMPTS {
-            match t.translate_batch(chunk, src, tgt).await {
-                Ok(translated_lines) => {
-                    if translated_lines.len() != chunk.len() {
-                        last_err = Some(anyhow::anyhow!(
-                            "expected {} translated lines, got {}",
-                            chunk.len(),
-                            translated_lines.len()
-                        ));
-                        continue;
-                    }
-                    for (seg, trans) in chunk.iter_mut().zip(translated_lines) {
-                        seg.translated_text = Some(trans);
-                    }
-                    pb.inc(chunk.len() as u64);
-                    done_len += chunk.len();
-                    if let Some(ref mut cb) = on_progress {
-                        cb(done_len, total_len);
-                    }
-                    success = true;
-                    break;
-                }
-                Err(err) => {
-                    let llm_err = err
-                        .chain()
-                        .find_map(|e| e.downcast_ref::<crate::llm::LlmError>())
-                        .cloned();
-                    last_err = Some(err);
-                    if let Some(llm_err) = llm_err {
-                        if !llm_err.is_retryable() {
-                            break;
+        'parts: while let Some(part) = parts.pop() {
+            let mut last_err = None;
+            let mut fatal = false;
+            let mut splittable = false;
+
+            for attempt in 1..=MAX_ATTEMPTS {
+                match t.translate_batch(part, src, tgt).await {
+                    Ok(translated_lines) => {
+                        if translated_lines.len() != part.len() {
+                            last_err = Some(anyhow::anyhow!(
+                                "expected {} translated lines, got {}",
+                                part.len(),
+                                translated_lines.len()
+                            ));
+                            splittable = true;
+                            continue;
                         }
-                        if llm_err.should_backoff() && attempt < MAX_ATTEMPTS {
-                            tokio::time::sleep(std::time::Duration::from_secs(2 * attempt as u64))
-                                .await;
+                        for (seg, trans) in part.iter_mut().zip(translated_lines) {
+                            seg.translated_text = Some(trans);
+                        }
+                        continue 'parts;
+                    }
+                    Err(err) => {
+                        let llm_err = err
+                            .chain()
+                            .find_map(|e| e.downcast_ref::<crate::llm::LlmError>())
+                            .cloned();
+                        last_err = Some(err);
+                        match llm_err {
+                            Some(le) if !le.is_retryable() => {
+                                fatal = true;
+                                break;
+                            }
+                            Some(le) => {
+                                splittable = false;
+                                if le.should_backoff() && attempt < MAX_ATTEMPTS {
+                                    tokio::time::sleep(std::time::Duration::from_secs(
+                                        2 * attempt as u64,
+                                    ))
+                                    .await;
+                                }
+                            }
+                            None => splittable = true,
                         }
                     }
                 }
             }
+
+            if !fatal && splittable && part.len() > 1 {
+                let mid = part.len() / 2;
+                let (left, right) = part.split_at_mut(mid);
+                parts.push(right);
+                parts.push(left);
+                continue 'parts;
+            }
+
+            chunk_err = Some(last_err.unwrap_or_else(|| anyhow::anyhow!("unknown error")));
+            break;
         }
 
-        if !success {
-            pb.finish_and_clear();
-            let err_msg = last_err
-                .map(|e| format!("{e:#}"))
-                .unwrap_or_else(|| "unknown error".to_string());
-            anyhow::bail!("translation failed for lines {start_line}–{end_line}: {err_msg}");
+        match chunk_err {
+            None => {
+                pb.inc(chunk_len as u64);
+                done_len += chunk_len;
+                if let Some(ref mut cb) = on_progress {
+                    cb(done_len, total_len);
+                }
+            }
+            Some(err) => {
+                pb.finish_and_clear();
+                anyhow::bail!("translation failed for lines {start_line}–{end_line}: {err:#}");
+            }
         }
     }
 
