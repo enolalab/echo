@@ -10,6 +10,7 @@ const general: GeneralSettings = {
   bilingual: true,
   style_preset: 'youtube_yellow',
   use_cloud_stt: false,
+  prefer_gpu: true,
   dub_enabled: false,
   tts_engine: 'local',
   tts_voice: null,

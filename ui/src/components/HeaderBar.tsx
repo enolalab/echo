@@ -45,6 +45,8 @@ interface HeaderBarProps {
   onStart: () => void;
   onCancel: () => void;
   systemInfo: SystemInfo | null;
+  preferGpu: boolean;
+  onToggleGpu: () => void;
   onDownloadModel: (name: string) => void;
   downloadingModel: string | null;
 }
@@ -140,6 +142,8 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onStart,
   onCancel,
   systemInfo,
+  preferGpu,
+  onToggleGpu,
   onDownloadModel,
   downloadingModel,
 }) => {
@@ -197,17 +201,34 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
 
         <div className="flex-1" />
 
-        <div
-          className={`flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium border shrink-0 whitespace-nowrap ${
-            systemInfo?.has_cuda
-              ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/50'
-              : 'bg-slate-800/60 text-slate-400 border-slate-700'
-          }`}
-          title={systemInfo?.has_cuda ? 'GPU NVIDIA CUDA kích hoạt' : 'Chế độ CPU đa luồng'}
-        >
-          {systemInfo?.has_cuda ? <Zap className="w-3 h-3" /> : <Cpu className="w-3 h-3" />}
-          <span>{systemInfo?.has_cuda ? 'CUDA GPU' : 'CPU'}</span>
-        </div>
+        {systemInfo?.has_cuda ? (
+          <button
+            type="button"
+            onClick={onToggleGpu}
+            aria-label="Chuyển chế độ CPU/GPU"
+            className={`flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium border shrink-0 whitespace-nowrap transition ${
+              preferGpu
+                ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/50 hover:bg-emerald-900/50'
+                : 'bg-slate-800/60 text-slate-400 border-slate-700 hover:bg-slate-700/60'
+            }`}
+            title={
+              preferGpu
+                ? 'Whisper ưu tiên GPU (CUDA) — bấm để chuyển sang CPU'
+                : 'Whisper chỉ dùng CPU — bấm để bật GPU'
+            }
+          >
+            {preferGpu ? <Zap className="w-3 h-3" /> : <Cpu className="w-3 h-3" />}
+            <span>{preferGpu ? 'CUDA GPU' : 'CPU'}</span>
+          </button>
+        ) : (
+          <div
+            className="flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium border shrink-0 whitespace-nowrap bg-slate-800/60 text-slate-400 border-slate-700"
+            title="Không phát hiện GPU CUDA — chỉ chạy CPU đa luồng"
+          >
+            <Cpu className="w-3 h-3" />
+            <span>CPU</span>
+          </div>
+        )}
 
         <button
           onClick={onOpenSettings}

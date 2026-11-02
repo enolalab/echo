@@ -82,6 +82,9 @@ pub struct GeneralSettings {
     pub use_cloud_stt: bool,
     /// Custom YouTube download directory. `None` → ~/Echo Studio/input/
     pub download_dir: Option<String>,
+    /// Prefer GPU (CUDA) for local Whisper when available; false → force CPU.
+    #[serde(default = "default_prefer_gpu")]
+    pub prefer_gpu: bool,
     /// Master switch: show dubbing option in the export dialog.
     #[serde(default)]
     pub dub_enabled: bool,
@@ -100,6 +103,10 @@ fn default_tts_engine() -> String {
     "local".into()
 }
 
+fn default_prefer_gpu() -> bool {
+    true
+}
+
 fn default_dub_orig_volume() -> f32 {
     0.15
 }
@@ -113,6 +120,7 @@ impl Default for GeneralSettings {
             style_preset: "youtube_yellow".into(),
             use_cloud_stt: false,
             download_dir: None,
+            prefer_gpu: default_prefer_gpu(),
             dub_enabled: false,
             tts_engine: default_tts_engine(),
             tts_voice: None,

@@ -341,7 +341,7 @@ async fn run_pipeline(
                 .ensure_whisper_model(&config.whisper_model)
                 .await
                 .map_err(|e| format!("Lỗi tải model Whisper: {e:#}"))?;
-            Box::new(LocalWhisperTranscriber::new(model_path, None, true))
+            Box::new(LocalWhisperTranscriber::new(model_path, None, config.prefer_gpu))
         }
     };
 

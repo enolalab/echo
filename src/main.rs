@@ -186,7 +186,7 @@ async fn run_app() -> anyhow::Result<()> {
                         format!("failed to ensure whisper model '{}'", cli.whisper_model)
                     })?;
                 Some(Box::new(LocalWhisperTranscriber::new(
-                    model_path, lang_opt, true,
+                    model_path, lang_opt, !cli.no_gpu,
                 )))
             }
             SttEngine::Api => {

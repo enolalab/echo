@@ -27,6 +27,7 @@ export interface PipelineConfig {
   use_cloud_stt: boolean;
   target_lang: string;
   skip_translate: boolean;
+  prefer_gpu?: boolean;
   profile_id?: string | null;
   skill_id?: string | null;
 }
@@ -123,6 +124,7 @@ export interface GeneralSettings {
   style_preset: StylePreset;
   use_cloud_stt: boolean;
   download_dir?: string | null;
+  prefer_gpu: boolean;
   dub_enabled: boolean;
   tts_engine: TtsEngineKind;
   tts_voice?: string | null;

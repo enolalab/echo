@@ -19,6 +19,10 @@ pub struct SystemInfo {
     pub whisper_models: Vec<WhisperModelInfo>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PipelineConfig {
     #[serde(default)]
@@ -29,6 +33,8 @@ pub struct PipelineConfig {
     pub use_cloud_stt: bool,
     pub target_lang: String,
     pub skip_translate: bool,
+    #[serde(default = "default_true")]
+    pub prefer_gpu: bool,
     #[serde(default)]
     pub profile_id: Option<String>,
     #[serde(default)]

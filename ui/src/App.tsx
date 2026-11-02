@@ -50,6 +50,7 @@ export default function App() {
     bilingual: true,
     style_preset: 'youtube_yellow',
     use_cloud_stt: false,
+    prefer_gpu: true,
     dub_enabled: false,
     tts_engine: 'local',
     tts_voice: null,
@@ -328,6 +329,7 @@ export default function App() {
         use_cloud_stt: general.use_cloud_stt,
         target_lang: targetLang,
         skip_translate: false,
+        prefer_gpu: general.prefer_gpu,
         profile_id: settingsRef.current?.default_profile_id ?? null,
         skill_id,
       });
@@ -516,6 +518,8 @@ export default function App() {
         onStart={handleStart}
         onCancel={handleCancel}
         systemInfo={systemInfo}
+        preferGpu={general.prefer_gpu}
+        onToggleGpu={() => patchGeneral({ prefer_gpu: !general.prefer_gpu })}
         onDownloadModel={downloadModel}
         downloadingModel={downloadingModel}
       />

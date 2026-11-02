@@ -29,6 +29,8 @@ describe('HeaderBar', () => {
         onStart={vi.fn()}
         onCancel={vi.fn()}
         systemInfo={null}
+        preferGpu={true}
+        onToggleGpu={vi.fn()}
         onDownloadModel={vi.fn()}
         downloadingModel={null}
       />
@@ -62,6 +64,8 @@ describe('HeaderBar', () => {
         onStart={vi.fn()}
         onCancel={vi.fn()}
         systemInfo={null}
+        preferGpu={true}
+        onToggleGpu={vi.fn()}
         onDownloadModel={vi.fn()}
         downloadingModel={null}
       />
@@ -101,6 +105,8 @@ describe('HeaderBar', () => {
         onStart={vi.fn()}
         onCancel={vi.fn()}
         systemInfo={null}
+        preferGpu={true}
+        onToggleGpu={vi.fn()}
         onDownloadModel={vi.fn()}
         downloadingModel={null}
       />
@@ -140,6 +146,8 @@ describe('HeaderBar', () => {
         onStart={vi.fn()}
         onCancel={vi.fn()}
         systemInfo={null}
+        preferGpu={true}
+        onToggleGpu={vi.fn()}
         onDownloadModel={vi.fn()}
         downloadingModel={null}
       />
@@ -180,6 +188,8 @@ describe('HeaderBar', () => {
         onStart={vi.fn()}
         onCancel={vi.fn()}
         systemInfo={null}
+        preferGpu={true}
+        onToggleGpu={vi.fn()}
         onDownloadModel={vi.fn()}
         downloadingModel={null}
       />

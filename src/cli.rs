@@ -101,6 +101,10 @@ pub struct Cli {
     #[arg(long)]
     pub keep_temp: bool,
 
+    /// Force local Whisper to run on CPU even when CUDA is available
+    #[arg(long)]
+    pub no_gpu: bool,
+
     /// Dub translated subtitles into a synthesized voice track
     #[arg(long)]
     pub dub: bool,
