@@ -15,6 +15,7 @@ import {
   Globe,
   ChevronDown,
   Clapperboard,
+  Youtube,
 } from 'lucide-react';
 import type { SystemInfo, StylePreset, ProfileView, Skill } from '../types';
 import { KIND_ICONS } from '../lib/providers';
@@ -23,6 +24,7 @@ interface HeaderBarProps {
   videoPath: string;
   jobCount?: number;
   onSelectVideo: () => void;
+  onOpenYoutubeModal?: () => void;
   whisperModel: string;
   onSelectWhisperModel: (m: string) => void;
   profiles: ProfileView[];
@@ -114,6 +116,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   videoPath,
   jobCount = 0,
   onSelectVideo,
+  onOpenYoutubeModal,
   whisperModel,
   onSelectWhisperModel,
   profiles,
@@ -176,6 +179,18 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           <FileVideo className="w-4 h-4 text-blue-400 shrink-0" />
           <span className="truncate font-medium">{fileName}</span>
         </button>
+
+        {onOpenYoutubeModal && (
+          <button
+            onClick={onOpenYoutubeModal}
+            disabled={isRunning}
+            className="flex items-center gap-2 h-8 px-3 rounded-md border border-red-700/50 bg-red-600/10 hover:bg-red-600/20 text-red-300 transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Tải video hoặc playlist từ YouTube"
+          >
+            <Youtube className="w-4 h-4 shrink-0" />
+            <span className="font-medium">Nhập từ YouTube</span>
+          </button>
+        )}
 
         <div className="flex-1" />
 

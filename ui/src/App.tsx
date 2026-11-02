@@ -12,6 +12,7 @@ import { ProgressDrawer } from './components/ProgressDrawer';
 import { ExportModal } from './components/ExportModal';
 import { JobList } from './components/JobList';
 import { SettingsModal } from './components/SettingsModal';
+import { YoutubeImportModal } from './components/YoutubeImportModal';
 import { useSystemInfo } from './hooks/useSystemInfo';
 import {
   startPipeline,
@@ -70,6 +71,7 @@ export default function App() {
   // UI state
   const [logs, setLogs] = useState<string[]>([]);
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isYoutubeModalOpen, setIsYoutubeModalOpen] = useState(false);
   const [outputDir, setOutputDir] = useState<string>('');
 
   const jobsRef = useRef(jobs);
@@ -212,6 +214,14 @@ export default function App() {
     [addJobs, pushToast]
   );
   const { isDragging } = useFileDrop(handleFilesDropped);
+
+  const handleYoutubeVideosDownloaded = useCallback(
+    (paths: string[]) => {
+      addJobs(paths);
+      pushToast(`Đã thêm ${paths.length} video từ YouTube vào hàng đợi`, 'success');
+    },
+    [addJobs, pushToast]
+  );
 
   const handleSelectVideos = async () => {
     if (isTauri()) {
@@ -435,6 +445,7 @@ export default function App() {
         videoPath={videoPath}
         jobCount={jobs.length}
         onSelectVideo={handleSelectVideos}
+        onOpenYoutubeModal={() => setIsYoutubeModalOpen(true)}
         whisperModel={whisperModel}
         onSelectWhisperModel={(m) => patchGeneral({ whisper_model: m })}
         profiles={settingsView?.profiles ?? []}
@@ -476,6 +487,7 @@ export default function App() {
                   onTimeUpdate={setCurrentTimeMs}
                   seekTimeMs={seekTimeMs}
                   onSeekComplete={() => setSeekTimeMs(null)}
+                  onOpenYoutubeModal={() => setIsYoutubeModalOpen(true)}
                 />
               </div>
 
@@ -544,7 +556,15 @@ export default function App() {
         }}
       />
 
-      {/* 5. Settings Modal */}
+      {/* 5. YouTube Import Modal (kept mounted so background downloads still queue) */}
+      <YoutubeImportModal
+        isOpen={isYoutubeModalOpen}
+        onClose={() => setIsYoutubeModalOpen(false)}
+        onVideosDownloaded={handleYoutubeVideosDownloaded}
+        defaultDownloadDir={general.download_dir ?? undefined}
+      />
+
+      {/* 6. Settings Modal */}
       {settingsView && (
         <SettingsModal
           isOpen={isSettingsOpen}
@@ -557,7 +577,7 @@ export default function App() {
         />
       )}
 
-      {/* 6. Drag overlay + Toasts */}
+      {/* 7. Drag overlay + Toasts */}
       {isDragging && (
         <div className="fixed inset-0 z-40 bg-blue-950/60 border-2 border-dashed border-blue-400 flex items-center justify-center pointer-events-none">
           <div className="flex flex-col items-center gap-2 text-blue-200">

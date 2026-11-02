@@ -152,4 +152,41 @@ describe('HeaderBar', () => {
     fireEvent.change(select, { target: { value: 'none' } });
     expect(onSelectSkill).toHaveBeenCalledWith(null);
   });
+
+  it('renders YouTube import button and triggers onOpenYoutubeModal', () => {
+    const onOpenYoutubeModal = vi.fn();
+    render(
+      <HeaderBar
+        videoPath=""
+        onSelectVideo={vi.fn()}
+        onOpenYoutubeModal={onOpenYoutubeModal}
+        whisperModel="base"
+        onSelectWhisperModel={vi.fn()}
+        profiles={[]}
+        defaultProfileId={null}
+        onSelectProfile={vi.fn()}
+        onOpenSettings={vi.fn()}
+        presets={[]}
+        userSkills={[]}
+        defaultSkillId={null}
+        onSelectSkill={vi.fn()}
+        targetLang="vi"
+        onSelectTargetLang={vi.fn()}
+        bilingual={true}
+        onToggleBilingual={vi.fn()}
+        stylePreset="youtube_yellow"
+        onSelectPreset={vi.fn()}
+        isRunning={false}
+        onStart={vi.fn()}
+        onCancel={vi.fn()}
+        systemInfo={null}
+        onDownloadModel={vi.fn()}
+        downloadingModel={null}
+      />
+    );
+    const btn = screen.getByRole('button', { name: /nhập từ youtube/i });
+    expect(btn).toBeTruthy();
+    fireEvent.click(btn);
+    expect(onOpenYoutubeModal).toHaveBeenCalled();
+  });
 });

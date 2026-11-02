@@ -98,6 +98,7 @@ export interface GeneralSettings {
   bilingual: boolean;
   style_preset: StylePreset;
   use_cloud_stt: boolean;
+  download_dir?: string | null;
 }
 
 export interface SettingsView {

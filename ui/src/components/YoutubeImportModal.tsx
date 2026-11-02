@@ -110,9 +110,11 @@ export const YoutubeImportModal: React.FC<YoutubeImportModalProps> = ({
       if (payload.stage === 'completed' && payload.saved_path) {
         onVideosDownloaded([payload.saved_path]);
       }
-    }).then((fn) => {
-      unlisten = fn;
-    });
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {});
     return () => {
       if (unlisten) unlisten();
     };

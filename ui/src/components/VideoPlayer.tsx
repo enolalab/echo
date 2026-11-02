@@ -8,6 +8,7 @@ import {
   Rewind,
   Repeat,
   Film,
+  Youtube,
 } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { isTauri } from '../lib/ipc';
@@ -25,6 +26,7 @@ interface VideoPlayerProps {
   onTimeUpdate: (ms: number) => void;
   seekTimeMs: number | null;
   onSeekComplete: () => void;
+  onOpenYoutubeModal?: () => void;
 }
 
 function formatTime(ms: number): string {
@@ -44,6 +46,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onTimeUpdate,
   seekTimeMs,
   onSeekComplete,
+  onOpenYoutubeModal,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -202,6 +205,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               <br />
               Hỗ trợ .mp4, .mkv, .mov
             </div>
+            {onOpenYoutubeModal && (
+              <button
+                onClick={onOpenYoutubeModal}
+                className="mt-1 flex items-center gap-2 h-9 px-4 rounded-lg border border-red-700/50 bg-red-600/10 hover:bg-red-600/20 text-red-300 text-xs font-medium transition-colors"
+              >
+                <Youtube className="w-4 h-4" />
+                Hoặc dán đường link YouTube để tải video / playlist
+              </button>
+            )}
           </div>
         )}
 
