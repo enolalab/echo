@@ -14,7 +14,7 @@ Add an optional dubbing stage to the pipeline: after translation, synthesize eac
 
 ## 1. Pipeline Integration & Data Flow
 
-The dub stage runs after translation (segments carry translated text) and before output rendering. **Two call sites** share the `src/dub.rs` functions: `pipeline::run` for the CLI, and the inline pipeline in `src-tauri/src/commands.rs` for the GUI (which reimplements the pipeline rather than calling `pipeline::run`, and additionally needs `dubbing` progress emission + `cancel_rx` checks).
+The dub stage runs after translation (segments carry translated text) and before output rendering. **Two call sites** share the `src/dub.rs` functions: `pipeline::run` for the CLI, and `export_subtitles` in `src-tauri/src/commands.rs` for the GUI. Note the GUI's `run_pipeline` (STT+translate) never renders video — it only returns `SubtitleSegment`s for editing; video/audio output happens later in `export_subtitles(ExportRequest)`. Dubbing at export time means the synthesized text reflects the user's subtitle edits.
 
 ```
 Translated SubtitleSegments
@@ -140,15 +140,15 @@ New **TTS / Lồng tiếng** section:
 
 ### 6.2 Job creation & progress
 
-- Job form gains a **"Lồng tiếng"** toggle; per-job params extend `PipelineConfig`: `{ dub: bool, tts_engine, tts_voice, tts_model, dub_orig_volume }`.
-- The dub stage inside the Tauri inline pipeline emits `pipeline-progress` events with stage `"dubbing"` (`current_step`/`total_steps` per segment → label `"Đang lồng tiếng 12/84"`) and checks `cancel_rx` between segments like the other stages.
+- `ExportModal` gains a **"Lồng tiếng"** toggle next to the bilingual option; `ExportRequest` gains an optional `dub: Option<DubOptions>` field (`#[serde(default)]`). Defaults come from `GeneralSettings`.
+- During `export_subtitles`, when `dub.enabled`, the dub stage runs before the final ffmpeg pass and emits a new `export-progress` event (`{ index, total }`) → `ExportModal` shows inline `"Đang lồng tiếng 12/84"`; a `pipeline-log` line is also emitted (existing channel, zero extra plumbing). `ExportRequest` gains an optional `job_id`; when present the command registers a cancel sender and checks `cancel_rx` between segments, so the existing `cancel_pipeline` command can abort a long dub.
 - Output player is unchanged: it already plays the rendered output file, which now carries the dubbed audio.
 
 ### 6.3 Tauri commands
 
 - `check_piper_status() -> PiperStatus` — `{installed, path, version}` like `check_yt_dlp_status`.
-- `ensure_piper() -> PiperStatus` — download binary + default voice if missing.
-- Existing run command extended with the dub params above; emits `job-progress` with stage `dubbing`.
+- `ensure_piper() -> PiperStatus` — download binary bundle + default voice if missing.
+- `export_subtitles(app, request)` — gains `AppHandle` (for progress/log events) and handles the optional `dub` field per §1–§4.
 
 ## 7. Data Models
 
@@ -171,8 +171,18 @@ pub struct PiperStatus {
     pub version: Option<String>,
 }
 
-// progress: existing PipelineProgressEvent, stage = "dubbing",
-// current_step/total_steps = per-segment index/total
+// new event emitted during GUI export dubbing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportProgress {
+    pub job_id: Option<String>,
+    pub stage: String,        // "dubbing"
+    pub index: usize,
+    pub total: usize,
+}
+
+// ExportRequest additions (all optional, #[serde(default)])
+pub dub: Option<DubOptions>;
+pub job_id: Option<String>;
 ```
 
 ## 8. Error Handling & Edge Cases
@@ -208,4 +218,4 @@ pub struct PiperStatus {
 - `--dub --mode softsub` and `--dub --mode subs-only` behave per the mode table (muxed track / emitted `.dub.wav`).
 - A segment whose TTS audio exceeds its slot is sped up ≤1.5x and never overlaps the next segment's start beyond the summed-overflow rule.
 - First run without Piper downloads binary bundle + default voice automatically; `--dub --tts-engine api` without API key fails fast with a clear message.
-- GUI: toggling "Lồng tiếng" on a job produces the same dubbed output as the CLI, shows `dubbing` progress, and cancel during dubbing aborts cleanly.
+- GUI: toggling "Lồng tiếng" in Export modal produces the same dubbed output as the CLI, shows `export-progress`/`pipeline-log` status, and cancel during dubbing aborts cleanly.
