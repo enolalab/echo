@@ -12,6 +12,10 @@ import type {
   ConnectionTest,
   Skill,
   TrySkillResult,
+  YtDlpStatus,
+  YoutubeDownloadRequest,
+  YoutubeInspectResult,
+  YoutubeProgressPayload,
 } from '../types';
 
 export function isTauri(): boolean {
@@ -320,4 +324,92 @@ export async function trySkill(
     return { lines: lines.map((l) => `[mock] ${l}`), system_prompt: skill.system_prompt, error: null };
   }
   return await invoke<TrySkillResult>('try_skill', { skill, profileId, sample, sourceLang, targetLang });
+}
+
+export async function checkYtDlpStatus(): Promise<YtDlpStatus> {
+  if (!isTauri()) {
+    return { installed: true, path: '/mock/bin/yt-dlp', version: 'mock' };
+  }
+  return await invoke<YtDlpStatus>('check_yt_dlp_status');
+}
+
+export async function ensureYtDlp(): Promise<YtDlpStatus> {
+  if (!isTauri()) {
+    await new Promise((r) => setTimeout(r, 500));
+    return { installed: true, path: '/mock/bin/yt-dlp', version: 'mock' };
+  }
+  return await invoke<YtDlpStatus>('ensure_yt_dlp');
+}
+
+export async function inspectYoutubeUrl(url: string): Promise<YoutubeInspectResult> {
+  if (!isTauri()) {
+    await new Promise((r) => setTimeout(r, 600));
+    return {
+      is_playlist: true,
+      playlist_id: 'PLmock',
+      title: 'Mock Playlist',
+      items: [
+        {
+          id: 'mock1',
+          title: 'Mock Video 1',
+          duration_seconds: 120,
+          channel_name: 'Mock Channel',
+          webpage_url: 'https://youtube.com/watch?v=mock1',
+        },
+        {
+          id: 'mock2',
+          title: 'Mock Video 2',
+          duration_seconds: 240,
+          channel_name: 'Mock Channel',
+          webpage_url: 'https://youtube.com/watch?v=mock2',
+        },
+      ],
+    };
+  }
+  return await invoke<YoutubeInspectResult>('inspect_youtube_url', { url });
+}
+
+export async function downloadYoutubeItems(req: YoutubeDownloadRequest): Promise<string[]> {
+  if (!isTauri()) {
+    const saved = req.items.map((i, idx) => `/mock/downloads/${i.id}.mp4`);
+    req.items.forEach((i, idx) => {
+      window.dispatchEvent(
+        new CustomEvent('echo:youtube-download-progress', {
+          detail: {
+            video_id: i.id,
+            index: idx,
+            total_items: req.items.length,
+            stage: 'completed',
+            percentage: 100,
+            saved_path: saved[idx],
+          } satisfies YoutubeProgressPayload,
+        })
+      );
+    });
+    return saved;
+  }
+  return await invoke<string[]>('download_youtube_items', { req });
+}
+
+export async function cancelYoutubeDownload(): Promise<void> {
+  if (!isTauri()) {
+    console.info('[Echo Studio] YouTube download cancelled (browser mode)');
+    return;
+  }
+  return await invoke('cancel_youtube_download');
+}
+
+export async function listenYoutubeProgress(
+  handler: (event: YoutubeProgressPayload) => void
+): Promise<() => void> {
+  if (isTauri()) {
+    return await listen<YoutubeProgressPayload>('youtube-download-progress', (e) =>
+      handler(e.payload)
+    );
+  }
+  const listener = (e: Event) => {
+    handler((e as CustomEvent<YoutubeProgressPayload>).detail);
+  };
+  window.addEventListener('echo:youtube-download-progress', listener);
+  return () => window.removeEventListener('echo:youtube-download-progress', listener);
 }
