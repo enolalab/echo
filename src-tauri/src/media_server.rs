@@ -6,7 +6,7 @@
 //! works because `http` is always an allowed media protocol, and Range
 //! requests give us normal seek behaviour.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
@@ -56,18 +56,13 @@ pub fn start() {
             .expect("media server runtime");
         rt.block_on(async move {
             let listener = TcpListener::from_std(listener).expect("tokio listener");
-            loop {
-                match listener.accept().await {
-                    Ok((stream, _)) => {
-                        let token = token.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) = handle_conn(stream, &token).await {
-                                eprintln!("[media] connection error: {e}");
-                            }
-                        });
+            while let Ok((stream, _)) = listener.accept().await {
+                let token = token.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = handle_conn(stream, &token).await {
+                        eprintln!("[media] connection error: {e}");
                     }
-                    Err(_) => break,
-                }
+                });
             }
         });
     });
@@ -117,7 +112,7 @@ fn url_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn mime_for(path: &PathBuf) -> &'static str {
+fn mime_for(path: &Path) -> &'static str {
     match path
         .extension()
         .and_then(|e| e.to_str())

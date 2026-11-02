@@ -72,7 +72,7 @@ impl ProviderProfile {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct GeneralSettings {
     pub whisper_model: String,
@@ -82,6 +82,23 @@ pub struct GeneralSettings {
     pub use_cloud_stt: bool,
     /// Custom YouTube download directory. `None` → ~/Echo Studio/input/
     pub download_dir: Option<String>,
+    /// "local" (Piper) | "api" (OpenAI-compatible /audio/speech)
+    #[serde(default = "default_tts_engine")]
+    pub tts_engine: String,
+    #[serde(default)]
+    pub tts_voice: Option<String>,
+    #[serde(default)]
+    pub tts_model: Option<String>,
+    #[serde(default = "default_dub_orig_volume")]
+    pub dub_orig_volume: f32,
+}
+
+fn default_tts_engine() -> String {
+    "local".into()
+}
+
+fn default_dub_orig_volume() -> f32 {
+    0.15
 }
 
 impl Default for GeneralSettings {
@@ -93,6 +110,10 @@ impl Default for GeneralSettings {
             style_preset: "youtube_yellow".into(),
             use_cloud_stt: false,
             download_dir: None,
+            tts_engine: default_tts_engine(),
+            tts_voice: None,
+            tts_model: None,
+            dub_orig_volume: default_dub_orig_volume(),
         }
     }
 }
@@ -101,7 +122,7 @@ fn default_version() -> u32 {
     SETTINGS_VERSION
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Settings {
     #[serde(default = "default_version")]
     pub version: u32,

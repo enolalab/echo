@@ -65,6 +65,8 @@ fn main() {
             import_skill,
             export_skill,
             try_skill,
+            check_piper_status,
+            ensure_piper,
             check_yt_dlp_status,
             ensure_yt_dlp,
             inspect_youtube_url,

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use auto_subtitle::settings::{GeneralSettings, ProviderProfile, SecretsBackend};
 use auto_subtitle::skills::Skill;
 use auto_subtitle::subtitle::SubtitleSegment;
+use auto_subtitle::tts::DubOptions;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WhisperModelInfo {
@@ -52,7 +53,7 @@ pub enum StylePreset {
     BilingualHighlight,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExportRequest {
     pub video_path: String,
     pub output_path: String,
@@ -60,6 +61,25 @@ pub struct ExportRequest {
     pub bilingual: bool,
     pub style_preset: StylePreset,
     pub segments: Vec<SubtitleSegment>,
+    #[serde(default)]
+    pub dub: Option<DubOptions>,
+    #[serde(default)]
+    pub job_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PiperStatus {
+    pub installed: bool,
+    pub path: Option<String>,
+    pub version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportProgress {
+    pub job_id: Option<String>,
+    pub stage: String,
+    pub index: usize,
+    pub total: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -80,7 +100,7 @@ pub struct ProfileView {
     pub has_key: bool,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SettingsView {
     pub profiles: Vec<ProfileView>,
     pub default_profile_id: Option<String>,

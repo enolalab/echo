@@ -1,5 +1,5 @@
 use auto_subtitle::subtitle::model::SubtitleSegment;
-use auto_subtitle_desktop::commands::export_subtitles;
+use auto_subtitle_desktop::commands::export_subtitles_core;
 use auto_subtitle_desktop::types::{ExportMode, ExportRequest, StylePreset};
 
 #[tokio::test]
@@ -20,9 +20,11 @@ async fn test_export_subs_only_e2e() {
             original_text: "And so, my fellow Americans".to_string(),
             translated_text: Some("Và vì vậy, đồng bào của tôi".to_string()),
         }],
+        dub: None,
+        job_id: None,
     };
 
-    let res = export_subtitles(req).await;
+    let res = export_subtitles_core(None, None, req).await;
     assert!(res.is_ok(), "export should succeed: {:?}", res.err());
     let srt_file = temp_dir.path().join("test_out.srt");
     let ass_file = temp_dir.path().join("test_out.ass");

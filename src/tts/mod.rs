@@ -13,7 +13,7 @@ pub enum TtsEngineKind {
     Api,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DubOptions {
     #[serde(default)]
     pub enabled: bool,

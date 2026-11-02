@@ -17,8 +17,8 @@ use auto_subtitle::translate::{LlmTranslator, Translator};
 
 use crate::state::AppState;
 use crate::types::{
-    ExportMode, ExportRequest, PipelineConfig, PipelineProgressEvent, StylePreset, SystemInfo,
-    WhisperModelInfo,
+    ExportMode, ExportProgress, ExportRequest, PipelineConfig, PipelineProgressEvent, PiperStatus,
+    StylePreset, SystemInfo, WhisperModelInfo,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -552,8 +552,126 @@ fn render_custom_ass(segments: &[SubtitleSegment], bilingual: bool, title: &str,
     out
 }
 
+fn piper_status(dm: &DependencyManager) -> PiperStatus {
+    match dm.find_piper() {
+        Some(p) => {
+            let version = std::process::Command::new(&p)
+                .arg("--version")
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+            PiperStatus {
+                installed: true,
+                path: Some(p.display().to_string()),
+                version,
+            }
+        }
+        None => PiperStatus {
+            installed: false,
+            path: None,
+            version: None,
+        },
+    }
+}
+
 #[tauri::command]
-pub async fn export_subtitles(request: ExportRequest) -> Result<String, String> {
+pub async fn check_piper_status() -> Result<PiperStatus, String> {
+    let dm = DependencyManager::new(get_app_config());
+    Ok(piper_status(&dm))
+}
+
+#[tauri::command]
+pub async fn ensure_piper(app: AppHandle, state: State<'_, AppState>) -> Result<PiperStatus, String> {
+    let dm = DependencyManager::new(get_app_config());
+    let _ = app.emit("pipeline-log", "Đang tải Piper TTS...");
+    dm.find_or_download_piper()
+        .await
+        .map_err(|e| format!("Tải Piper thất bại: {e:#}"))?;
+    // Default voice follows settings target_lang (same rule as CLI).
+    let lang = {
+        let store = state.settings.lock().map_err(|_| "Lỗi khóa cài đặt")?;
+        store.settings().general.target_lang.clone()
+    };
+    if let Some(v) = auto_subtitle::tts::default_voice_for_lang(&lang) {
+        dm.ensure_voice(v)
+            .await
+            .map_err(|e| format!("Tải voice thất bại: {e:#}"))?;
+    }
+    let _ = app.emit("pipeline-log", "Piper TTS sẵn sàng!");
+    Ok(piper_status(&dm))
+}
+
+async fn build_export_tts(
+    dm: &DependencyManager,
+    dub: &auto_subtitle::tts::DubOptions,
+    state: &AppState,
+) -> Result<Box<dyn auto_subtitle::tts::TtsEngine>, String> {
+    use auto_subtitle::tts::{api::ApiTts, piper::PiperTts, TtsEngineKind};
+    match dub.engine {
+        TtsEngineKind::Local => {
+            let piper = dm
+                .find_or_download_piper()
+                .await
+                .map_err(|e| format!("{e:#}"))?;
+            let (model, cfg) = match dub.voice.as_deref() {
+                Some(v) if auto_subtitle::tts::find_voice(v).is_some() => dm
+                    .ensure_voice(auto_subtitle::tts::find_voice(v).unwrap())
+                    .await
+                    .map_err(|e| format!("{e:#}"))?,
+                Some(v) => {
+                    let p = PathBuf::from(v);
+                    let c = p.with_extension("onnx.json");
+                    if !p.is_file() || !c.is_file() {
+                        return Err(format!("Voice không hợp lệ: {v}"));
+                    }
+                    (p, c)
+                }
+                None => {
+                    let lang = {
+                        let store = state.settings.lock().map_err(|_| "Lỗi khóa cài đặt")?;
+                        store.settings().general.target_lang.clone()
+                    };
+                    let info = auto_subtitle::tts::default_voice_for_lang(&lang).ok_or(format!(
+                        "Không có giọng Piper nào cho '{lang}' — chọn voice hoặc engine api"
+                    ))?;
+                    dm.ensure_voice(info).await.map_err(|e| format!("{e:#}"))?
+                }
+            };
+            Ok(Box::new(PiperTts::new(piper, model, cfg)))
+        }
+        TtsEngineKind::Api => {
+            let key = {
+                let store = state.settings.lock().map_err(|_| "Lỗi khóa cài đặt")?;
+                store.stt_key().ok().flatten()
+            }
+            .ok_or("Chưa nhập API key cho TTS".to_string())?;
+            Ok(Box::new(ApiTts::new(
+                "https://api.openai.com/v1".to_string(),
+                key,
+                dub.model.clone().unwrap_or_else(|| "tts-1".into()),
+                dub.voice.clone().unwrap_or_else(|| "alloy".into()),
+            )))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn export_subtitles(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: ExportRequest,
+) -> Result<String, String> {
+    export_subtitles_core(Some(app), Some(&state), request).await
+}
+
+/// Export body shared by the Tauri command and tests.
+/// `app`/`state` may be None in tests — dub then errors only if enabled.
+pub async fn export_subtitles_core(
+    app: Option<AppHandle>,
+    state: Option<&AppState>,
+    request: ExportRequest,
+) -> Result<String, String> {
     let app_config = get_app_config();
     let dm = DependencyManager::new(app_config);
     let ffmpeg = dm
@@ -574,6 +692,56 @@ pub async fn export_subtitles(request: ExportRequest) -> Result<String, String> 
 
     let temp_dir = tempfile::tempdir().map_err(|e| e.to_string())?;
 
+    let dub_track: Option<(PathBuf, bool)> =
+        if let Some(dub) = request.dub.as_ref().filter(|d| d.enabled) {
+            let state = state.ok_or("Lồng tiếng yêu cầu app state")?;
+            let job_key = request.job_id.clone().unwrap_or_else(|| "export".into());
+            let mut cancel_rx = {
+                let mut senders = state.cancel_senders.lock().await;
+                let (tx, rx) = broadcast::channel(1);
+                senders.insert(job_key.clone(), tx);
+                rx
+            };
+            let engine = build_export_tts(&dm, dub, state).await?;
+            let app_c = app.clone();
+            let jid = request.job_id.clone();
+            // `cancel_rx` is moved in; try_recv(&mut self) works via FnMut bound.
+            let result = auto_subtitle::dub::render_dub_track(
+                engine.as_ref(),
+                &request.segments,
+                &ffmpeg,
+                temp_dir.path(),
+                &video_in,
+                move |idx, total| {
+                    if let Some(a) = &app_c {
+                        let _ = a.emit(
+                            "export-progress",
+                            ExportProgress {
+                                job_id: jid.clone(),
+                                stage: "dubbing".into(),
+                                index: idx,
+                                total,
+                            },
+                        );
+                        let _ = a.emit(
+                            "pipeline-log",
+                            format!("Đang lồng tiếng {idx}/{total}..."),
+                        );
+                    }
+                },
+                move || cancel_rx.try_recv().is_ok(),
+            )
+            .await;
+            // Always release the cancel slot for this export (success or error).
+            {
+                let mut senders = state.cancel_senders.lock().await;
+                senders.remove(&job_key);
+            }
+            Some(result.map_err(|e| format!("Lỗi lồng tiếng: {e:#}"))?)
+        } else {
+            None
+        };
+
     match request.mode {
         ExportMode::SubsOnly => {
             let srt_content = render_srt(&request.segments, request.bilingual);
@@ -582,14 +750,37 @@ pub async fn export_subtitles(request: ExportRequest) -> Result<String, String> 
             let ass_out = out_path.with_extension("ass");
             std::fs::write(&srt_out, srt_content).map_err(|e| e.to_string())?;
             std::fs::write(&ass_out, ass_content).map_err(|e| e.to_string())?;
+            if let Some((ref dw, _)) = dub_track {
+                let wav_out = out_path.with_extension("dub.wav");
+                std::fs::copy(dw, &wav_out).map_err(|e| e.to_string())?;
+                return Ok(format!(
+                    "Đã xuất file phụ đề + giọng đọc: {}, {}, {}",
+                    srt_out.display(),
+                    ass_out.display(),
+                    wav_out.display()
+                ));
+            }
             Ok(format!("Đã xuất file phụ đề: {} và {}", srt_out.display(), ass_out.display()))
         }
         ExportMode::Hardsub => {
             let ass_content = render_custom_ass(&request.segments, request.bilingual, "Echo", request.style_preset);
             let temp_ass = temp_dir.path().join("sub.ass");
             std::fs::write(&temp_ass, ass_content).map_err(|e| e.to_string())?;
-            let cmd = media::build_hardsub_command(&ffmpeg, &video_in, &temp_ass, &out_path)
-                .map_err(|e| format!("Lỗi tạo lệnh Hardsub: {e:#}"))?;
+            let cmd = if let Some((ref dw, has_audio)) = dub_track {
+                media::build_hardsub_dub_command(
+                    &ffmpeg,
+                    &video_in,
+                    &temp_ass,
+                    dw,
+                    &out_path,
+                    request.dub.as_ref().map(|d| d.orig_volume).unwrap_or(0.15),
+                    has_audio,
+                )
+                .map_err(|e| format!("Lỗi tạo lệnh Hardsub: {e:#}"))?
+            } else {
+                media::build_hardsub_command(&ffmpeg, &video_in, &temp_ass, &out_path)
+                    .map_err(|e| format!("Lỗi tạo lệnh Hardsub: {e:#}"))?
+            };
             tokio::task::spawn_blocking(move || run_ffmpeg(cmd, "hardsub"))
                 .await
                 .map_err(|e| e.to_string())?
@@ -600,8 +791,21 @@ pub async fn export_subtitles(request: ExportRequest) -> Result<String, String> 
             let srt_content = render_srt(&request.segments, request.bilingual);
             let temp_srt = temp_dir.path().join("sub.srt");
             std::fs::write(&temp_srt, srt_content).map_err(|e| e.to_string())?;
-            let cmd = media::build_softsub_command(&ffmpeg, &video_in, &temp_srt, &out_path)
-                .map_err(|e| format!("Lỗi tạo lệnh Softsub: {e:#}"))?;
+            let cmd = if let Some((ref dw, has_audio)) = dub_track {
+                media::build_softsub_dub_command(
+                    &ffmpeg,
+                    &video_in,
+                    &temp_srt,
+                    dw,
+                    &out_path,
+                    request.dub.as_ref().map(|d| d.orig_volume).unwrap_or(0.15),
+                    has_audio,
+                )
+                .map_err(|e| format!("Lỗi tạo lệnh Softsub: {e:#}"))?
+            } else {
+                media::build_softsub_command(&ffmpeg, &video_in, &temp_srt, &out_path)
+                    .map_err(|e| format!("Lỗi tạo lệnh Softsub: {e:#}"))?
+            };
             tokio::task::spawn_blocking(move || run_ffmpeg(cmd, "softsub"))
                 .await
                 .map_err(|e| e.to_string())?
