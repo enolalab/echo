@@ -202,20 +202,24 @@ impl DependencyManager {
         exe.is_file().then_some(exe)
     }
 
-    /// Auto-download supported on Linux x86_64 only (same policy as ffmpeg).
-    /// Other platforms: install piper manually so it's on PATH.
+    /// Auto-download supported where a tar.gz asset exists (Linux x86_64, macOS
+    /// x64/aarch64). Windows ships a .zip — install piper manually so it's on PATH.
+    /// Pinned to tag 2023.11.14-2 (rhasspy/piper redirects to OHF-Voice/piper1-gpl,
+    /// whose latest releases are the Python package, not the C++ binary bundles).
     pub async fn find_or_download_piper(&self) -> Result<PathBuf> {
         if let Some(p) = self.find_piper() {
             return Ok(p);
         }
-        if !(cfg!(target_os = "linux") && std::env::consts::ARCH == "x86_64") {
-            anyhow::bail!(
-                "Automatic Piper download is only supported on Linux x86_64. \
-                 Install piper manually and ensure it is in your PATH."
-            );
-        }
-
-        let url = "https://github.com/rhasspy/piper/releases/latest/download/piper_linux_x86_64.tar.gz";
+        const TAG: &str = "https://github.com/rhasspy/piper/releases/download/2023.11.14-2";
+        let url = match (std::env::consts::OS, std::env::consts::ARCH) {
+            ("linux", "x86_64") => format!("{TAG}/piper_linux_x86_64.tar.gz"),
+            ("macos", "x86_64") => format!("{TAG}/piper_macos_x64.tar.gz"),
+            ("macos", "aarch64") => format!("{TAG}/piper_macos_aarch64.tar.gz"),
+            (os, arch) => anyhow::bail!(
+                "Automatic Piper download is not supported on {os}/{arch} \
+                 (Windows bundles a .zip). Install piper manually and ensure it is in your PATH."
+            ),
+        };
         let temp_dir = tempfile::tempdir().context("failed to create temp dir for piper")?;
         let archive = temp_dir.path().join("piper.tar.gz");
         download_to(&self.client, url, &archive).await?;
@@ -363,9 +367,18 @@ impl TtsEngine for PiperTts {
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped());
-        // espeak-ng-data + lib/ resolve relative to the binary's dir.
+        // espeak-ng-data + bundled .so files resolve relative to the binary's dir
+        // (release layout may put them beside the binary or under <bundle>/lib/).
         if let Some(parent) = self.piper.parent() {
             cmd.current_dir(parent);
+            let mut ld = format!("{}:{}", parent.join("lib").display(), parent.display());
+            if let Ok(existing) = std::env::var("LD_LIBRARY_PATH") {
+                if !existing.is_empty() {
+                    ld.push(':');
+                    ld.push_str(&existing);
+                }
+            }
+            cmd.env("LD_LIBRARY_PATH", ld);
         }
         let mut child = cmd.spawn().context("failed to spawn piper")?;
         child
@@ -721,7 +734,7 @@ git commit -m "feat(dub): slot planning, ffmpeg probing, tempo decision"
 
 **Interfaces:**
 - Consumes: Task 5 items, `TtsEngine`, `run_ffmpeg`.
-- Produces: `DubClip {start_ms, wav_path}`; `render_dub_track(engine, segs, ffmpeg, work_dir, video_path, on_progress: P, is_cancelled: C) -> Result<PathBuf>`; `media::build_normalize_clip_command(ffmpeg, in, out, tempo) -> Command`; `media::wav_duration_ms(&Path) -> Result<u64>`.
+- Produces: `DubClip {start_ms, wav_path}`; `render_dub_track(engine, segs, ffmpeg, work_dir, video_path, on_progress: P, is_cancelled: C) -> Result<(PathBuf /*wav*/, bool /*has_audio*/)>` where `P: FnMut(usize,usize)`, `C: FnMut() -> bool`; `media::build_normalize_clip_command(ffmpeg, in, out, tempo) -> Command`; `media::wav_duration_ms(&Path) -> Result<u64>`.
 
 - [ ] **Step 1: Failing tests for track math**
 
@@ -748,11 +761,12 @@ git commit -m "feat(dub): slot planning, ffmpeg probing, tempo decision"
         ];
         let track = build_track(&clips).unwrap();
         assert_eq!(track.len(), 1500 * 48);
-        // overlap region has larger amplitude than single-clip region
+        // overlap region (500-1000ms) has larger amplitude than single-clip region
         let solo = track[100 * 48].abs() as i32;
         let both = track[700 * 48].abs() as i32;
         assert!(both > solo || both == i16::MAX as i32);
-        assert!(track.iter().take(50 * 48).all(|&s| s != 0 || true)); // first 50ms may start at 0 amplitude
+        // silence before first clip isn't tested here (first clip starts at 0)
+        // but tail end: last sample index == 1500ms*48 - 1 bounds check via len above
     }
 
     #[test]
@@ -840,6 +854,7 @@ pub fn write_track_wav(samples: &[i16], out: &Path) -> anyhow::Result<()> {
 
 /// Full dub stage: probe → plan → synthesize+fit per segment → track → dubbed.wav.
 /// Skips failed segments; errors if >50% fail or `is_cancelled` between segments.
+/// Returns (wav_path, has_audio): callers reuse has_audio for mux dispatch.
 pub async fn render_dub_track<P, C>(
     engine: &dyn TtsEngine,
     segs: &[SubtitleSegment],
@@ -847,13 +862,13 @@ pub async fn render_dub_track<P, C>(
     work_dir: &Path,
     video_path: &Path,
     mut on_progress: P,
-    is_cancelled: C,
-) -> anyhow::Result<PathBuf>
+    mut is_cancelled: C,
+) -> anyhow::Result<(PathBuf, bool)>
 where
     P: FnMut(usize, usize) + Send,
-    C: Fn() -> bool + Send,
+    C: FnMut() -> bool + Send,
 {
-    let (video_end_ms, _has_audio) = probe_media(ffmpeg, video_path);
+    let (video_end_ms, has_audio) = probe_media(ffmpeg, video_path);
     let plans = plan_segments(segs, video_end_ms);
     anyhow::ensure!(!plans.is_empty(), "no synthesizable subtitle text for dubbing");
     let total = plans.len();
@@ -908,7 +923,7 @@ where
     let samples = build_track(&clips)?;
     let out = work_dir.join("dubbed.wav");
     write_track_wav(&samples, &out)?;
-    Ok(out)
+    Ok((out, has_audio))
 }
 ```
 
@@ -1149,40 +1164,37 @@ Add to `Deps`:
 In `run()`, after the translation block and before `resolve_output_paths` consumers (place after `work_srt`/`work_ass` writes, before `outputs` vec):
 
 ```rust
-    let dub_wav: Option<PathBuf> = if cli.dub {
+    let dub_track: Option<(PathBuf, bool)> = if cli.dub {
         let engine = deps.tts.context("tts engine required for --dub")?;
         let ffmpeg = deps.ffmpeg.as_ref().context("ffmpeg is required for --dub")?;
         let sp = ProgressBar::new_spinner();
         sp.set_message("Dubbing translated subtitles...");
         sp.enable_steady_tick(std::time::Duration::from_millis(100));
-        let total = segments.len();
-        let wav = crate::dub::render_dub_track(
+        let sp_cb = sp.clone(); // ProgressBar is a shared handle
+        let seg_total = segments.len();
+        let wav_and_audio = crate::dub::render_dub_track(
             engine,
             &segments,
             ffmpeg,
             work_dir,
             &cli.input,
-            move |done, _t| sp.set_message(format!("Đang lồng tiếng {done}/{total}...")),
-            || false,
+            move |done, _t| sp_cb.set_message(format!("Đang lồng tiếng {done}/{seg_total}...")),
+            || false, // CLI has no cancellation; `FnMut` bound accepts plain fns
         )
         .await?;
-        Some(wav)
+        sp.finish_and_clear();
+        Some(wav_and_audio)
     } else {
         None
     };
 ```
 
-(`sp` must be declared `mut`? `ProgressBar::new_spinner()` — `set_message` needs `&self`, ok. But closure moves `sp` — declare `let sp = ...` then closure `move` uses it; after await, `sp` was moved — restructure: use `Rc`? Simplest: drop the bar with a normal `println!` progress — but keep bar: capture `sp.clone()`? ProgressBar is `Clone` (it's a shared handle). So `let sp2 = sp.clone();` closure moves sp2, then `sp.finish_and_clear()` after.)
-
-Update mode dispatch:
+Update mode dispatch — `has_audio` comes from the probe already done inside `render_dub_track`:
 
 ```rust
         OutputMode::Hardsub => {
             // ... existing ffmpeg/video_dest resolution ...
-            let has_audio = dub_wav.is_some()
-                .then(|| crate::dub::probe_media(ffmpeg, &cli.input).1)
-                .unwrap_or(false);
-            let cmd = if let Some(ref dw) = dub_wav {
+            let cmd = if let Some((ref dw, has_audio)) = dub_track {
                 crate::media::build_hardsub_dub_command(
                     ffmpeg, &cli.input, &work_ass, dw, video_dest, cli.dub_orig_volume, has_audio,
                 )?
@@ -1198,7 +1210,7 @@ Parallel change in `OutputMode::Softsub` with `build_softsub_dub_command(ffmpeg,
 In `OutputMode::SubsOnly`: after existing srt/ass copy, add:
 
 ```rust
-            if let Some(ref dw) = dub_wav {
+            if let Some((ref dw, _)) = dub_track {
                 let wav_dest = output_paths
                     .srt
                     .with_file_name(format!("{}.dub.wav",
@@ -1210,6 +1222,8 @@ In `OutputMode::SubsOnly`: after existing srt/ass copy, add:
 ```
 
 - [ ] **Step 3: `main.rs` wiring**
+
+Add `use std::path::PathBuf;` to imports (needed by `resolve_local_voice`).
 
 ffmpeg condition: `if cli.mode == OutputMode::SubsOnly && cli.subtitle.is_some() && !cli.dub` (dub needs ffmpeg even for subs-only).
 
@@ -1375,18 +1389,21 @@ pub async fn check_piper_status() -> Result<PiperStatus, String> {
 }
 
 #[tauri::command]
-pub async fn ensure_piper(app: AppHandle) -> Result<PiperStatus, String> {
+pub async fn ensure_piper(app: AppHandle, state: State<'_, AppState>) -> Result<PiperStatus, String> {
     let dm = DependencyManager::new(get_app_config());
     let _ = app.emit("pipeline-log", "Đang tải Piper TTS...");
-    let bin = dm
-        .find_or_download_piper()
+    dm.find_or_download_piper()
         .await
         .map_err(|e| format!("Tải Piper thất bại: {e:#}"))?;
-    if let Some(v) = auto_subtitle::tts::default_voice_for_lang("vi") {
+    // Default voice follows settings target_lang (same rule as CLI).
+    let lang = {
+        let store = state.settings.lock().map_err(|_| "Lỗi khóa cài đặt")?;
+        store.settings().general.target_lang.clone()
+    };
+    if let Some(v) = auto_subtitle::tts::default_voice_for_lang(&lang) {
         dm.ensure_voice(v).await.map_err(|e| format!("Tải voice thất bại: {e:#}"))?;
     }
     let _ = app.emit("pipeline-log", "Piper TTS sẵn sàng!");
-    let _ = bin; // status re-reads path
     Ok(piper_status(&dm))
 }
 ```
@@ -1400,17 +1417,19 @@ Change signature: `pub async fn export_subtitles(app: AppHandle, state: State<'_
 At top, after `let temp_dir = ...`, insert the dub stage before `match request.mode`:
 
 ```rust
-    let dub_wav: Option<PathBuf> = if let Some(dub) = request.dub.as_ref().filter(|d| d.enabled) {
+    let dub_track: Option<(PathBuf, bool)> = if let Some(dub) = request.dub.as_ref().filter(|d| d.enabled) {
+        let job_key = request.job_id.clone().unwrap_or_else(|| "export".into());
         let mut cancel_rx = {
             let mut senders = state.cancel_senders.lock().await;
             let (tx, rx) = broadcast::channel(1);
-            senders.insert(request.job_id.clone().unwrap_or_else(|| "export".into()), tx);
+            senders.insert(job_key.clone(), tx);
             rx
         };
         let engine = build_export_tts(&dm, dub, &request, &state).await?;
         let app_c = app.clone();
         let jid = request.job_id.clone();
-        let wav = auto_subtitle::dub::render_dub_track(
+        // `cancel_rx` is moved in; try_recv(&mut self) works via FnMut bound.
+        let result = auto_subtitle::dub::render_dub_track(
             engine.as_ref(),
             &request.segments,
             &ffmpeg,
@@ -1424,9 +1443,13 @@ At top, after `let temp_dir = ...`, insert the dub stage before `match request.m
             },
             move || cancel_rx.try_recv().is_ok(),
         )
-        .await
-        .map_err(|e| format!("Lỗi lồng tiếng: {e:#}"))?;
-        Some(wav)
+        .await;
+        // Always release the cancel slot for this export (success or error).
+        {
+            let mut senders = state.cancel_senders.lock().await;
+            senders.remove(&job_key);
+        }
+        Some(result.map_err(|e| format!("Lỗi lồng tiếng: {e:#}"))?)
     } else {
         None
     };
@@ -1486,13 +1509,12 @@ async fn build_export_tts(
 }
 ```
 
-Then in each `ExportMode` arm use dub variants when `dub_wav.is_some()`:
+Then in each `ExportMode` arm use dub variants when `dub_track.is_some()` — `has_audio` comes from the tuple's bool (probe already ran inside `render_dub_track`):
 
 ```rust
         ExportMode::Hardsub => {
-            // ... existing ass write ...
-            let has_audio = auto_subtitle::dub::probe_media(&ffmpeg, &video_in).1;
-            let cmd = if let Some(ref dw) = dub_wav {
+            // ... existing ass write → temp_ass ...
+            let cmd = if let Some((ref dw, has_audio)) = dub_track {
                 media::build_hardsub_dub_command(&ffmpeg, &video_in, &temp_ass, dw, &out_path,
                     request.dub.as_ref().map(|d| d.orig_volume).unwrap_or(0.15), has_audio)
                     .map_err(|e| format!("Lỗi tạo lệnh Hardsub: {e:#}"))?
@@ -1504,9 +1526,9 @@ Then in each `ExportMode` arm use dub variants when `dub_wav.is_some()`:
         }
 ```
 
-`Softsub` arm: `build_softsub_dub_command(&ffmpeg, &video_in, &temp_srt, dw, &out_path, vol, has_audio)` — note existing softsub branch writes `temp_srt`? Read current arm: it writes ass only for hardsub; softsub writes `temp_dir/subs.srt` via render_srt — reuse whatever srt path exists; if none, write `render_srt(&request.segments, request.bilingual)` to `temp_dir/sub.srt` before building command.
+`Softsub` arm: existing code writes `temp_srt = temp_dir/sub.srt` via `render_srt` — reuse it: `build_softsub_dub_command(&ffmpeg, &video_in, &temp_srt, dw, &out_path, vol, has_audio)`.
 
-`SubsOnly` arm: after writing srt/ass, if `dub_wav` → copy to `out_path.with_extension("dub.wav")`, mention in result message.
+`SubsOnly` arm: after writing srt/ass, `if let Some((ref dw, _)) = dub_track` → `std::fs::copy(dw, out_path.with_extension("dub.wav"))` and mention it in the result message.
 
 - [ ] **Step 5: Verify** `cargo build --workspace` → clean; `cargo test -p auto-subtitle` → pass.
 
