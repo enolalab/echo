@@ -97,6 +97,9 @@ pub struct GeneralSettings {
     pub tts_model: Option<String>,
     #[serde(default = "default_dub_orig_volume")]
     pub dub_orig_volume: f32,
+    /// Render speed preset: "fast" | "balanced" | "quality" (hardsub only)
+    #[serde(default = "default_render_speed")]
+    pub render_speed: String,
 }
 
 fn default_tts_engine() -> String {
@@ -109,6 +112,10 @@ fn default_prefer_gpu() -> bool {
 
 fn default_dub_orig_volume() -> f32 {
     0.15
+}
+
+fn default_render_speed() -> String {
+    "balanced".into()
 }
 
 impl Default for GeneralSettings {
@@ -126,6 +133,7 @@ impl Default for GeneralSettings {
             tts_voice: None,
             tts_model: None,
             dub_orig_volume: default_dub_orig_volume(),
+            render_speed: default_render_speed(),
         }
     }
 }

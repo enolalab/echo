@@ -44,6 +44,8 @@ export interface DubOptions {
   original_volume: number;
 }
 
+export type RenderSpeed = 'fast' | 'balanced' | 'quality';
+
 export interface ExportRequest {
   video_path: string;
   output_path: string;
@@ -53,6 +55,7 @@ export interface ExportRequest {
   segments: SubtitleSegment[];
   dub?: DubOptions | null;
   job_id?: string | null;
+  render_speed?: RenderSpeed;
 }
 
 export interface PiperStatus {
@@ -130,6 +133,7 @@ export interface GeneralSettings {
   tts_voice?: string | null;
   tts_model?: string | null;
   dub_orig_volume: number;
+  render_speed: RenderSpeed;
 }
 
 export interface SettingsView {

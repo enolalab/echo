@@ -22,6 +22,7 @@ import type {
   SubtitleSegment,
   DubOptions,
   ExportProgress,
+  RenderSpeed,
 } from '../types';
 import { pickSaveFile } from '../lib/ipc';
 import { listen } from '@tauri-apps/api/event';
@@ -34,6 +35,7 @@ interface ExportModalProps {
   segments: SubtitleSegment[];
   initialPreset: StylePreset;
   initialBilingual: boolean;
+  initialRenderSpeed?: RenderSpeed;
   dubDefaults?: Omit<DubOptions, 'enabled'>;
   /** Other finished jobs eligible for batch export (deduped vs current video). */
   batchItems?: { videoPath: string; segments: SubtitleSegment[] }[];
@@ -83,6 +85,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   segments,
   initialPreset,
   initialBilingual,
+  initialRenderSpeed,
   dubDefaults,
   batchItems,
   onExport,
@@ -93,6 +96,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [outputPath, setOutputPath] = useState(defaultOutputPath);
   const [stylePreset, setStylePreset] = useState<StylePreset>(initialPreset);
   const [bilingual, setBilingual] = useState(initialBilingual);
+  const [renderSpeed, setRenderSpeed] = useState<RenderSpeed>(initialRenderSpeed ?? 'balanced');
   const [dubEnabled, setDubEnabled] = useState(!!dubDefaults);
   const [exportStage, setExportStage] = useState<'idle' | 'dubbing' | 'rendering'>('idle');
   const [dubCount, setDubCount] = useState<{ index: number; total: number } | null>(null);
@@ -113,10 +117,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       setExportStage('idle');
       setDubCount(null);
       setDubEnabled(!!dubDefaults);
+      setRenderSpeed(initialRenderSpeed ?? 'balanced');
       setFileProgress(null);
       setBatchMode(false);
     }
-  }, [isOpen, defaultOutputPath, dubDefaults]);
+  }, [isOpen, defaultOutputPath, dubDefaults, initialRenderSpeed]);
 
   const allItems = useMemo(() => {
     const seen = new Set<string>();
@@ -202,6 +207,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             segments: it.segments,
             dub: dubActive ? { enabled: true, ...dubDefaults } : null,
             job_id: jobId,
+            render_speed: renderSpeed,
           });
           okCount++;
         } catch (err) {
@@ -442,6 +448,23 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               {mode === 'subs_only' && (
                 <span className="text-[10px] text-slate-500">Kiểu dáng chỉ áp dụng cho Hardsub / Softsub</span>
               )}
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-semibold text-slate-300">
+                Tốc độ render
+              </label>
+              <select
+                aria-label="Tốc độ render"
+                value={renderSpeed}
+                onChange={(e) => setRenderSpeed(e.target.value as RenderSpeed)}
+                disabled={mode !== 'hardsub' || isExporting}
+                className="h-9 px-3 rounded-lg border border-slate-700 bg-slate-900 text-slate-200 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <option value="fast">Nhanh</option>
+                <option value="balanced">Cân bằng</option>
+                <option value="quality">Đẹp (chậm)</option>
+              </select>
             </div>
 
             <div className="flex flex-col gap-1.5">

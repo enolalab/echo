@@ -766,7 +766,10 @@ pub async fn export_subtitles_core(
                 .ok()
         })
         .unwrap_or(false);
-    let use_nvenc = prefer_gpu && media::nvenc_available(&ffmpeg);
+    let enc = media::EncoderOpts {
+        nvenc: prefer_gpu && media::nvenc_available(&ffmpeg),
+        speed: media::RenderSpeed::parse(&request.render_speed),
+    };
 
     match request.mode {
         ExportMode::SubsOnly => {
@@ -801,11 +804,11 @@ pub async fn export_subtitles_core(
                     &out_path,
                     request.dub.as_ref().map(|d| d.orig_volume).unwrap_or(0.15),
                     has_audio,
-                    use_nvenc,
+                    enc,
                 )
                 .map_err(|e| format!("Lỗi tạo lệnh Hardsub: {e:#}"))?
             } else {
-                media::build_hardsub_command(&ffmpeg, &video_in, &temp_ass, &out_path, use_nvenc)
+                media::build_hardsub_command(&ffmpeg, &video_in, &temp_ass, &out_path, enc)
                     .map_err(|e| format!("Lỗi tạo lệnh Hardsub: {e:#}"))?
             };
             tokio::task::spawn_blocking(move || run_ffmpeg(cmd, "hardsub"))

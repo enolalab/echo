@@ -56,6 +56,7 @@ export default function App() {
     tts_voice: null,
     tts_model: null,
     dub_orig_volume: 0.15,
+    render_speed: 'balanced',
   });
   const [settingsView, setSettingsView] = useState<SettingsView | null>(null);
   const settingsRef = useRef<SettingsView | null>(null);
@@ -603,6 +604,7 @@ export default function App() {
         segments={segments}
         initialPreset={stylePreset}
         initialBilingual={bilingual}
+        initialRenderSpeed={general.render_speed}
         dubDefaults={
           general.dub_enabled
             ? {

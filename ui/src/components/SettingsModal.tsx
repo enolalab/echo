@@ -459,6 +459,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <option value="bilingual_highlight">Bilingual Highlight</option>
               </select>
             </label>
+            <label className="flex flex-col gap-1">
+              <span>Tốc độ render (hardsub)</span>
+              <select
+                aria-label="Tốc độ render"
+                value={general.render_speed}
+                onChange={(e) => patchGeneral({ render_speed: e.target.value as GeneralSettings['render_speed'] })}
+                className={inputCls}
+              >
+                <option value="fast">Nhanh (chất lượng vừa)</option>
+                <option value="balanced">Cân bằng</option>
+                <option value="quality">Đẹp (chậm hơn)</option>
+              </select>
+            </label>
 
             <div className="flex flex-col gap-2 rounded border border-slate-700/60 bg-slate-900/40 p-3">
               <span className="font-semibold text-slate-300 flex items-center gap-1.5">

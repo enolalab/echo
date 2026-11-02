@@ -105,6 +105,10 @@ pub struct Cli {
     #[arg(long)]
     pub no_gpu: bool,
 
+    /// Render speed preset for video re-encode (hardsub)
+    #[arg(long, value_parser = ["fast", "balanced", "quality"], default_value = "balanced")]
+    pub render_speed: String,
+
     /// Dub translated subtitles into a synthesized voice track
     #[arg(long)]
     pub dub: bool,

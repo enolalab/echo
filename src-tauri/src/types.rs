@@ -71,6 +71,13 @@ pub struct ExportRequest {
     pub dub: Option<DubOptions>,
     #[serde(default)]
     pub job_id: Option<String>,
+    /// "fast" | "balanced" | "quality" — hardsub re-encode only.
+    #[serde(default = "default_render_speed")]
+    pub render_speed: String,
+}
+
+fn default_render_speed() -> String {
+    "balanced".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

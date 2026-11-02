@@ -58,12 +58,57 @@ pub fn nvenc_available(ffmpeg: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn push_video_encoder(cmd: &mut Command, use_nvenc: bool) {
-    if use_nvenc {
-        // NVENC: quality-cq ~ x264 crf; p4 = balanced preset.
-        cmd.arg("-c:v").arg("h264_nvenc").arg("-preset").arg("p4").arg("-cq").arg("20");
+/// Render speed/quality trade-off for video re-encode (hardsub only).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RenderSpeed {
+    Fast,
+    #[default]
+    Balanced,
+    Quality,
+}
+
+impl RenderSpeed {
+    /// Tolerant parser: anything unrecognized falls back to Balanced.
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "fast" => Self::Fast,
+            "quality" | "high" => Self::Quality,
+            _ => Self::Balanced,
+        }
+    }
+}
+
+/// Encoder selection for re-encode paths: device + speed preset.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EncoderOpts {
+    pub nvenc: bool,
+    pub speed: RenderSpeed,
+}
+
+/// Push `-hwaccel cuda` before an input arg (only for the NVENC path):
+/// decode on GPU; ffmpeg auto-inserts hwdownload for CPU-side filters (ass).
+fn push_hwaccel(cmd: &mut Command, enc: EncoderOpts) {
+    if enc.nvenc {
+        cmd.arg("-hwaccel").arg("cuda");
+    }
+}
+
+fn push_video_encoder(cmd: &mut Command, enc: EncoderOpts) {
+    if enc.nvenc {
+        // NVENC: cq ~ x264 crf; p2/p4/p6 = fast/balanced/quality.
+        let preset = match enc.speed {
+            RenderSpeed::Fast => "p2",
+            RenderSpeed::Balanced => "p4",
+            RenderSpeed::Quality => "p6",
+        };
+        cmd.arg("-c:v").arg("h264_nvenc").arg("-preset").arg(preset).arg("-cq").arg("20");
     } else {
-        cmd.arg("-c:v").arg("libx264").arg("-preset").arg("medium").arg("-crf").arg("20");
+        let preset = match enc.speed {
+            RenderSpeed::Fast => "veryfast",
+            RenderSpeed::Balanced => "medium",
+            RenderSpeed::Quality => "slow",
+        };
+        cmd.arg("-c:v").arg("libx264").arg("-preset").arg(preset).arg("-crf").arg("20");
     }
 }
 
@@ -72,7 +117,7 @@ pub fn build_hardsub_command(
     video: &Path,
     ass_path: &Path,
     output: &Path,
-    use_nvenc: bool,
+    enc: EncoderOpts,
 ) -> anyhow::Result<Command> {
     let file_name = ass_path
         .file_name()
@@ -98,11 +143,9 @@ pub fn build_hardsub_command(
     if let Some(parent) = ass_path.parent() {
         cmd.current_dir(parent);
     }
-    cmd.arg("-hide_banner")
-        .arg("-loglevel")
-        .arg("error")
-        .arg("-y")
-        .arg("-i")
+    cmd.arg("-hide_banner").arg("-loglevel").arg("error").arg("-y");
+    push_hwaccel(&mut cmd, enc);
+    cmd.arg("-i")
         .arg(&abs_video)
         .arg("-map")
         .arg("0:v:0")
@@ -110,7 +153,7 @@ pub fn build_hardsub_command(
         .arg("0:a?")
         .arg("-vf")
         .arg(format!("ass={file_name}"));
-    push_video_encoder(&mut cmd, use_nvenc);
+    push_video_encoder(&mut cmd, enc);
     cmd.arg("-c:a").arg("copy").arg(&abs_output);
     Ok(cmd)
 }
@@ -126,7 +169,7 @@ pub fn build_hardsub_dub_command(
     output: &Path,
     orig_volume: f32,
     has_audio: bool,
-    use_nvenc: bool,
+    enc: EncoderOpts,
 ) -> anyhow::Result<Command> {
     let file_name = ass_path
         .file_name()
@@ -160,11 +203,10 @@ pub fn build_hardsub_dub_command(
     if let Some(parent) = ass_path.parent() {
         cmd.current_dir(parent);
     }
-    cmd.arg("-hide_banner")
-        .arg("-loglevel")
-        .arg("error")
-        .arg("-y")
-        .arg("-i")
+    cmd.arg("-hide_banner").arg("-loglevel").arg("error").arg("-y");
+    // hwaccel applies only to the video input (first -i).
+    push_hwaccel(&mut cmd, enc);
+    cmd.arg("-i")
         .arg(&abs_video)
         .arg("-i")
         .arg(&abs_dub)
@@ -177,7 +219,7 @@ pub fn build_hardsub_dub_command(
     } else {
         cmd.arg("-map").arg("1:a");
     }
-    push_video_encoder(&mut cmd, use_nvenc);
+    push_video_encoder(&mut cmd, enc);
     cmd.arg("-c:a").arg("aac").arg(&abs_output);
     Ok(cmd)
 }
@@ -363,7 +405,7 @@ mod tests {
             Path::new("/o.mp4"),
             0.15,
             true,
-            false,
+            EncoderOpts { nvenc: false, speed: RenderSpeed::Balanced },
         )
         .unwrap();
         let args: Vec<String> = cmd
