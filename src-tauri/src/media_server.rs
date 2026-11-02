@@ -60,12 +60,26 @@ pub fn start() {
                 let token = token.clone();
                 tokio::spawn(async move {
                     if let Err(e) = handle_conn(stream, &token).await {
-                        eprintln!("[media] connection error: {e}");
+                        // The webview aborts in-flight Range requests on every
+                        // seek/pause — a reset socket is normal, not an error.
+                        if !is_client_disconnect(&e) {
+                            eprintln!("[media] connection error: {e}");
+                        }
                     }
                 });
             }
         });
     });
+}
+
+/// Client aborted the transfer (seek/pause/close) — expected, skip logging.
+fn is_client_disconnect(e: &anyhow::Error) -> bool {
+    e.chain().any(|c| {
+        matches!(
+            c.downcast_ref::<std::io::Error>().map(|io| io.kind()),
+            Some(std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe)
+        )
+    })
 }
 
 /// Build the playback URL for a local file path, if the server is running.
