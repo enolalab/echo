@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod config;
 pub mod downloader;
+pub mod dub;
 pub mod llm;
 pub mod media;
 pub mod pipeline;
