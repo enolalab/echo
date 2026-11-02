@@ -9,3 +9,4 @@ pub mod skills;
 pub mod stt;
 pub mod subtitle;
 pub mod translate;
+pub mod youtube;
