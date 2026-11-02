@@ -145,6 +145,45 @@ pub fn build_softsub_command(
     Ok(cmd)
 }
 
+/// Normalize any input to 48 kHz mono s16 WAV; applies atempo when tempo > 1.001.
+pub fn build_normalize_clip_command(
+    ffmpeg: &Path,
+    input: &Path,
+    out_wav: &Path,
+    tempo: f64,
+) -> Command {
+    let mut cmd = Command::new(ffmpeg);
+    cmd.arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-y")
+        .arg("-i")
+        .arg(input);
+    if tempo > 1.001 {
+        cmd.arg("-af")
+            .arg(format!("atempo={tempo:.4},aresample=48000"));
+    } else {
+        cmd.arg("-af").arg("aresample=48000");
+    }
+    cmd.arg("-ac")
+        .arg("1")
+        .arg("-ar")
+        .arg("48000")
+        .arg("-c:a")
+        .arg("pcm_s16le")
+        .arg(out_wav);
+    cmd
+}
+
+/// WAV duration via header (no decode). Err for non-WAV inputs.
+pub fn wav_duration_ms(path: &Path) -> anyhow::Result<u64> {
+    let r = hound::WavReader::open(path)
+        .with_context(|| format!("cannot read wav {}", path.display()))?;
+    let spec = r.spec();
+    anyhow::ensure!(spec.sample_rate > 0, "wav has zero sample rate");
+    Ok(r.duration() as u64 * 1000 / spec.sample_rate as u64)
+}
+
 /// Runs the command; on non-zero exit returns Err containing the last 20 stderr lines.
 pub fn run_ffmpeg(mut cmd: Command, what: &str) -> anyhow::Result<()> {
     let output = cmd

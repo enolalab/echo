@@ -1,7 +1,9 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use anyhow::Context;
 
 use crate::subtitle::model::SubtitleSegment;
-use crate::tts::normalize_tts_text;
+use crate::tts::{normalize_tts_text, TtsEngine};
 
 pub const MAX_OVERFLOW_MS: u64 = 2000;
 pub const MAX_TEMPO: f64 = 1.5;
@@ -90,6 +92,138 @@ pub fn probe_media(ffmpeg: &Path, video: &Path) -> (Option<u64>, bool) {
     }
 }
 
+#[derive(Debug)]
+pub struct DubClip {
+    pub start_ms: u64,
+    pub wav_path: PathBuf, // normalized 48 kHz mono s16
+}
+
+/// Sum-mix clips onto a silent 48 kHz timeline; returns interleaved i16 samples.
+pub fn build_track(clips: &[DubClip]) -> anyhow::Result<Vec<i16>> {
+    let mut staged: Vec<(usize, Vec<i16>)> = Vec::new();
+    let mut end = 0usize;
+    for c in clips {
+        let mut r = hound::WavReader::open(&c.wav_path)
+            .with_context(|| format!("cannot read clip {}", c.wav_path.display()))?;
+        let spec = r.spec();
+        anyhow::ensure!(
+            spec.channels == 1 && spec.sample_rate == 48000 && spec.bits_per_sample == 16,
+            "clip {} not 48kHz mono s16",
+            c.wav_path.display()
+        );
+        let samples: Vec<i16> = r.samples::<i16>().collect::<Result<_, _>>()?;
+        let start = c.start_ms as usize * 48;
+        end = end.max(start + samples.len());
+        staged.push((start, samples));
+    }
+    let mut acc = vec![0i32; end];
+    for (start, samples) in staged {
+        for (j, s) in samples.iter().enumerate() {
+            acc[start + j] += *s as i32;
+        }
+    }
+    Ok(acc
+        .iter()
+        .map(|&v| v.clamp(i16::MIN as i32, i16::MAX as i32) as i16)
+        .collect())
+}
+
+pub fn write_track_wav(samples: &[i16], out: &Path) -> anyhow::Result<()> {
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 48000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(out, spec)
+        .with_context(|| format!("cannot create {}", out.display()))?;
+    for s in samples {
+        w.write_sample(*s)?;
+    }
+    w.finalize()?;
+    Ok(())
+}
+
+/// Full dub stage: probe → plan → synthesize+fit per segment → track → dubbed.wav.
+/// Skips failed segments; errors if >50% fail or `is_cancelled` between segments.
+/// Returns (wav_path, has_audio): callers reuse has_audio for mux dispatch.
+pub async fn render_dub_track<P, C>(
+    engine: &dyn TtsEngine,
+    segs: &[SubtitleSegment],
+    ffmpeg: &Path,
+    work_dir: &Path,
+    video_path: &Path,
+    mut on_progress: P,
+    mut is_cancelled: C,
+) -> anyhow::Result<(PathBuf, bool)>
+where
+    P: FnMut(usize, usize) + Send,
+    C: FnMut() -> bool + Send,
+{
+    let (video_end_ms, has_audio) = probe_media(ffmpeg, video_path);
+    let plans = plan_segments(segs, video_end_ms);
+    anyhow::ensure!(!plans.is_empty(), "no synthesizable subtitle text for dubbing");
+    let total = plans.len();
+    let mut clips = Vec::with_capacity(total);
+    let mut failures = 0usize;
+
+    for (idx, plan) in plans.into_iter().enumerate() {
+        if is_cancelled() {
+            anyhow::bail!("dubbing cancelled");
+        }
+        on_progress(idx + 1, total);
+        let raw_path = work_dir.join(format!("dub_raw_{idx}.bin"));
+        let clip_path = work_dir.join(format!("dub_clip_{idx}.wav"));
+        let fitted = async {
+            let bytes = engine.synthesize(&plan.text).await?;
+            tokio::fs::write(&raw_path, &bytes).await?;
+            let dur_ms = match crate::media::wav_duration_ms(&raw_path) {
+                Ok(d) => (raw_path.clone(), d),
+                Err(_) => {
+                    // Non-WAV payload (e.g. provider returned mp3): normalize first, then measure.
+                    let probe = work_dir.join(format!("dub_probe_{idx}.wav"));
+                    crate::media::run_ffmpeg(
+                        crate::media::build_normalize_clip_command(ffmpeg, &raw_path, &probe, 1.0),
+                        "dub probe normalize",
+                    )?;
+                    let d = crate::media::wav_duration_ms(&probe)?;
+                    (probe, d)
+                }
+            };
+            let (src, dur) = dur_ms;
+            let tempo = decide_tempo(dur, plan.budget_ms);
+            crate::media::run_ffmpeg(
+                crate::media::build_normalize_clip_command(ffmpeg, &src, &clip_path, tempo),
+                "dub clip normalize",
+            )?;
+            anyhow::Ok(DubClip {
+                start_ms: plan.start_ms,
+                wav_path: clip_path,
+            })
+        }
+        .await;
+        match fitted {
+            Ok(c) => clips.push(c),
+            Err(e) => {
+                failures += 1;
+                eprintln!(
+                    "Warning: TTS failed for segment {}: {e:#}",
+                    plan.seg_index + 1
+                );
+            }
+        }
+    }
+
+    anyhow::ensure!(
+        failures * 2 <= total,
+        "dubbing failed for {failures}/{total} segments — aborting"
+    );
+    let samples = build_track(&clips)?;
+    let out = work_dir.join("dubbed.wav");
+    write_track_wav(&samples, &out)?;
+    Ok((out, has_audio))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,5 +276,52 @@ mod tests {
         assert_eq!(parse_ffmpeg_duration_ms(err), Some(83_450));
         assert!(parse_has_audio(err));
         assert!(!parse_has_audio("Stream #0:0: Video: h264"));
+    }
+
+    fn write_sine_wav(path: &Path, ms: u64) {
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut w = hound::WavWriter::create(path, spec).unwrap();
+        for _ in 0..(ms * 48) {
+            w.write_sample(5000i16).unwrap();
+        }
+        w.finalize().unwrap();
+    }
+
+    #[test]
+    fn track_places_clips_and_sums_overlap() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.wav");
+        let b = dir.path().join("b.wav");
+        write_sine_wav(&a, 1000);
+        write_sine_wav(&b, 1000);
+        let clips = vec![
+            DubClip {
+                start_ms: 0,
+                wav_path: a,
+            },
+            DubClip {
+                start_ms: 500,
+                wav_path: b,
+            }, // overlaps a by 500ms
+        ];
+        let track = build_track(&clips).unwrap();
+        assert_eq!(track.len(), 1500 * 48);
+        // overlap region (500-1000ms) has larger amplitude than single-clip region
+        let solo = track[100 * 48].abs() as i32;
+        let both = track[700 * 48].abs() as i32;
+        assert!(both > solo || both == i16::MAX as i32);
+    }
+
+    #[test]
+    fn wav_duration_reads_ms() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("x.wav");
+        write_sine_wav(&p, 250);
+        assert_eq!(crate::media::wav_duration_ms(&p).unwrap(), 250);
     }
 }
