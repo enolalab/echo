@@ -2,6 +2,53 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  /*
+   * WebKitGTK (Tauri on Linux) renders native <select> with the GTK theme,
+   * which gives a white background regardless of Tailwind's bg-transparent.
+   * Force a custom dark appearance with our own chevron for every select.
+   */
+  select {
+    -webkit-appearance: none;
+    appearance: none;
+    background-color: rgb(15 23 42); /* slate-900 */
+    color: rgb(226 232 240); /* slate-200 */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 12px 12px;
+    padding-right: 1.75rem !important;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  select option,
+  select optgroup {
+    background-color: rgb(30 41 59); /* slate-800 */
+    color: rgb(226 232 240);
+  }
+  button {
+    white-space: nowrap;
+  }
+}
+
+@layer components {
+  /* Compact labelled field used in the header toolbar */
+  .toolbar-select {
+    @apply h-8 rounded-md border border-slate-700 bg-slate-900 pl-2.5 text-xs text-slate-200 transition-colors hover:border-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40 cursor-pointer;
+  }
+  .toolbar-label {
+    @apply text-[10px] font-semibold uppercase tracking-wider text-slate-500 whitespace-nowrap;
+  }
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

@@ -2,7 +2,6 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import {
   Play,
   Pause,
-  RotateCcw,
   Volume2,
   VolumeX,
   FastForward,
@@ -193,9 +192,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             className="w-full h-full object-contain cursor-pointer"
           />
         ) : (
-          <div className="text-slate-500 text-sm flex flex-col items-center gap-2">
-            <RotateCcw className="w-8 h-8 opacity-40 animate-pulse" />
-            <span>Kéo thả video vào đây hoặc chọn file trên thanh menu</span>
+          <div className="m-6 w-full max-w-lg flex flex-col items-center gap-3 text-center rounded-xl border-2 border-dashed border-slate-800 px-8 py-10">
+            <div className="w-14 h-14 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center">
+              <Film className="w-6 h-6 text-slate-500" />
+            </div>
+            <div className="text-sm font-medium text-slate-300">Chưa có video</div>
+            <div className="text-xs text-slate-500 leading-relaxed">
+              Kéo thả file video vào cửa sổ, hoặc bấm nút <span className="text-blue-400 font-medium">Mở video...</span> trên thanh công cụ.
+              <br />
+              Hỗ trợ .mp4, .mkv, .mov
+            </div>
           </div>
         )}
 

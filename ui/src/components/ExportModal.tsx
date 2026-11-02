@@ -1,5 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { X, Film, Layers, FileCode, FolderOpen, CheckCircle, Loader2, Folder, Play } from 'lucide-react';
+import {
+  X,
+  Film,
+  Layers,
+  FileCode,
+  FolderOpen,
+  CheckCircle2,
+  Loader2,
+  Folder,
+  Play,
+  Copy,
+  Check,
+  AlertCircle,
+} from 'lucide-react';
 import type { ExportMode, StylePreset, ExportRequest, SubtitleSegment } from '../types';
 import { pickSaveFile } from '../lib/ipc';
 
@@ -15,6 +28,39 @@ interface ExportModalProps {
   onOpenFolder: (path: string) => void;
   onExported?: (outputPath: string | null) => void;
 }
+
+const EXPORT_MODES: {
+  id: ExportMode;
+  title: string;
+  desc: string;
+  badge?: string;
+  icon: typeof Film;
+  color: string;
+}[] = [
+  {
+    id: 'hardsub',
+    title: 'Hardsub',
+    desc: 'Gắn cứng phụ đề trực tiếp vào video. Tương thích mọi thiết bị và nền tảng.',
+    badge: 'Khuyên dùng',
+    icon: Film,
+    color: 'text-amber-400',
+  },
+  {
+    id: 'softsub',
+    title: 'Softsub',
+    desc: 'Nhúng track phụ đề vào container MP4/MKV. Bật/tắt được và render tức thì.',
+    badge: 'Siêu nhanh',
+    icon: Layers,
+    color: 'text-indigo-400',
+  },
+  {
+    id: 'subs_only',
+    title: 'Subs-only',
+    desc: 'Chỉ xuất riêng các file phụ đề độc lập (.srt và .ass) mà không can thiệp video.',
+    icon: FileCode,
+    color: 'text-cyan-400',
+  },
+];
 
 export const ExportModal: React.FC<ExportModalProps> = ({
   isOpen,
@@ -35,13 +81,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [isExporting, setIsExporting] = useState(false);
   const [exportResult, setExportResult] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
-  // Keep output path in sync when the modal (re)opens or the suggested path changes
   useEffect(() => {
     if (isOpen) {
       setOutputPath(defaultOutputPath);
       setExportResult(null);
       setErrorMsg(null);
+      setCopied(false);
     }
   }, [isOpen, defaultOutputPath]);
 
@@ -49,7 +96,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   const handleBrowseOutputPath = async () => {
     const ext = mode === 'hardsub' ? 'mp4' : mode === 'softsub' ? 'mkv' : 'srt';
-    const filename = outputPath ? outputPath.split('/').pop() || `subtitled.${ext}` : `subtitled.${ext}`;
+    const filename = outputPath ? outputPath.split(/[/\\]/).pop() || `subtitled.${ext}` : `subtitled.${ext}`;
     const selected = await pickSaveFile(filename, ext);
     if (selected) {
       setOutputPath(selected);
@@ -79,130 +126,148 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
   };
 
+  const handleCopyPath = () => {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(outputPath).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      });
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 select-none">
-      <div className="bg-slate-900 border border-slate-700/80 rounded-xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col text-xs text-slate-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 select-none">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col text-xs text-slate-200">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm font-bold text-white">
-            <Film className="w-4 h-4 text-emerald-400" />
-            <span>Xuất Phụ Đề / Video Hoàn Thiện</span>
+        <div className="px-6 py-4 border-b border-slate-800/80 flex items-center justify-between bg-slate-950/40">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+              <Film className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-white tracking-tight">Xuất Phụ Đề & Video Hoàn Thiện</h2>
+              <p className="text-[11px] text-slate-400">Chọn định dạng và cấu hình xuất video hoặc file phụ đề</p>
+            </div>
           </div>
           <button
             onClick={onClose}
             disabled={isExporting}
-            className="p-1 text-slate-400 hover:text-white rounded transition"
+            className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition disabled:opacity-40"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-5 flex flex-col gap-4">
-          {/* Export Mode Selection */}
-          <div className="flex flex-col gap-2">
-            <label className="font-semibold text-slate-300">1. Chế độ xuất:</label>
-            <div className="grid grid-cols-3 gap-2.5">
-              {/* Hardsub */}
-              <div
-                onClick={() => setMode('hardsub')}
-                className={`p-3 rounded-lg border cursor-pointer flex flex-col gap-1 transition ${
-                  mode === 'hardsub'
-                    ? 'bg-blue-950/50 border-blue-500 text-white shadow-sm'
-                    : 'bg-slate-800/40 border-slate-700/60 hover:bg-slate-800 text-slate-400'
-                }`}
-              >
-                <div className="flex items-center gap-1.5 font-bold">
-                  <Film className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Hardsub</span>
-                </div>
-                <span className="text-[11px] leading-tight text-slate-400">
-                  Gắn cứng phụ đề vào hình ảnh video.
-                </span>
-              </div>
-
-              {/* Softsub */}
-              <div
-                onClick={() => setMode('softsub')}
-                className={`p-3 rounded-lg border cursor-pointer flex flex-col gap-1 transition ${
-                  mode === 'softsub'
-                    ? 'bg-blue-950/50 border-blue-500 text-white shadow-sm'
-                    : 'bg-slate-800/40 border-slate-700/60 hover:bg-slate-800 text-slate-400'
-                }`}
-              >
-                <div className="flex items-center gap-1.5 font-bold">
-                  <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>Softsub</span>
-                </div>
-                <span className="text-[11px] leading-tight text-slate-400">
-                  Nhúng track phụ đề vào MP4/MKV (siêu nhanh).
-                </span>
-              </div>
-
-              {/* Subs-only */}
-              <div
-                onClick={() => setMode('subs_only')}
-                className={`p-3 rounded-lg border cursor-pointer flex flex-col gap-1 transition ${
-                  mode === 'subs_only'
-                    ? 'bg-blue-950/50 border-blue-500 text-white shadow-sm'
-                    : 'bg-slate-800/40 border-slate-700/60 hover:bg-slate-800 text-slate-400'
-                }`}
-              >
-                <div className="flex items-center gap-1.5 font-bold">
-                  <FileCode className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Subs-only</span>
-                </div>
-                <span className="text-[11px] leading-tight text-slate-400">
-                  Chỉ xuất file .srt và .ass độc lập.
-                </span>
-              </div>
+        <div className="p-6 flex flex-col gap-5 overflow-y-auto max-h-[calc(85vh-130px)]">
+          {/* 1. Export Mode Selection */}
+          <div className="flex flex-col gap-2.5">
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              1. Chế độ xuất video & phụ đề
+            </label>
+            <div className="grid grid-cols-3 gap-3">
+              {EXPORT_MODES.map((item) => {
+                const Icon = item.icon;
+                const isSelected = mode === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setMode(item.id)}
+                    className={`relative p-3.5 rounded-xl border text-left flex flex-col gap-2 transition-all ${
+                      isSelected
+                        ? 'bg-blue-600/10 border-blue-500 text-white shadow-sm ring-1 ring-blue-500/30'
+                        : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 hover:bg-slate-850 text-slate-400'
+                    }`}
+                  >
+                    {item.badge && (
+                      <span className="absolute top-2.5 right-2.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                        {item.badge}
+                      </span>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <Icon className={`w-4 h-4 ${isSelected ? item.color : 'text-slate-400'}`} />
+                      <span className={`font-semibold text-xs ${isSelected ? 'text-white' : 'text-slate-300'}`}>
+                        {item.title}
+                      </span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-slate-400 pr-1">
+                      {item.desc}
+                    </p>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* Subtitle Style & Bilingual */}
-          <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
+          {/* 2. Styling & Bilingual options */}
+          <div className="grid grid-cols-2 gap-4 p-4 rounded-xl bg-slate-950/40 border border-slate-800/80">
             <div className="flex flex-col gap-1.5">
-              <label className="font-semibold text-slate-300">2. Kiểu dáng phụ đề:</label>
+              <label className="text-[11px] font-semibold text-slate-300">
+                2. Kiểu dáng phụ đề
+              </label>
               <select
                 value={stylePreset}
                 onChange={(e) => setStylePreset(e.target.value as StylePreset)}
-                className="bg-slate-800 border border-slate-700 rounded px-2.5 py-1.5 text-slate-200 focus:outline-none"
+                disabled={mode === 'subs_only'}
+                className="h-9 px-3 rounded-lg border border-slate-700 bg-slate-900 text-slate-200 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40 cursor-pointer disabled:opacity-40"
               >
                 <option value="youtube_yellow">YouTube Yellow</option>
                 <option value="classic_white">Classic White</option>
                 <option value="netflix_modern">Netflix Modern</option>
                 <option value="bilingual_highlight">Bilingual Highlight</option>
               </select>
+              {mode === 'subs_only' && (
+                <span className="text-[10px] text-slate-500">Kiểu dáng chỉ áp dụng cho Hardsub / Softsub</span>
+              )}
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="font-semibold text-slate-300">Song ngữ:</label>
-              <label className="flex items-center gap-2 mt-1.5 cursor-pointer text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={bilingual}
-                  onChange={(e) => setBilingual(e.target.checked)}
-                  className="rounded bg-slate-800 border-slate-700 text-blue-500 focus:ring-0"
-                />
-                <span>Xuất cả tiếng gốc và bản dịch</span>
+              <label className="text-[11px] font-semibold text-slate-300">
+                Hiển thị song ngữ
               </label>
+              <button
+                type="button"
+                onClick={() => setBilingual(!bilingual)}
+                className={`h-9 px-3 rounded-lg border flex items-center justify-between transition-colors ${
+                  bilingual
+                    ? 'border-blue-500/60 bg-blue-600/10 text-slate-200'
+                    : 'border-slate-700 bg-slate-900 text-slate-400 hover:border-slate-600'
+                }`}
+              >
+                <span className="text-xs">Xuất cả gốc & dịch</span>
+                <span
+                  className={`relative w-8 h-[18px] rounded-full transition-colors shrink-0 ${
+                    bilingual ? 'bg-blue-600' : 'bg-slate-700'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-transform ${
+                      bilingual ? 'translate-x-[14px]' : ''
+                    }`}
+                  />
+                </span>
+              </button>
             </div>
           </div>
 
-          {/* Output Path Input */}
-          <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-800">
-            <label className="font-semibold text-slate-300">3. Vị trí lưu file:</label>
+          {/* 3. Output Destination */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              3. Vị trí lưu file hoàn thiện
+            </label>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={outputPath}
                 onChange={(e) => setOutputPath(e.target.value)}
-                className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-blue-500"
+                placeholder="/duong/dan/toi/file_xuat.mp4"
+                className="flex-1 h-9 bg-slate-900 border border-slate-700 rounded-lg px-3 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40"
               />
               <button
                 type="button"
                 onClick={handleBrowseOutputPath}
-                className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-[11px] text-slate-300 transition shrink-0"
+                className="h-9 px-3.5 flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-200 text-xs font-medium transition shrink-0"
               >
                 <Folder className="w-3.5 h-3.5 text-blue-400" />
                 <span>Duyệt...</span>
@@ -210,55 +275,80 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
           </div>
 
-          {/* Result or Error Banner */}
+          {/* Result Banner with clean multi-row layout */}
           {exportResult && (
-            <div className="bg-emerald-950/50 border border-emerald-800/80 rounded-lg p-3 text-emerald-300 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <CheckCircle className="w-4 h-4 shrink-0" />
-                <span>{exportResult}</span>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {mode !== 'subs_only' && (
+            <div className="rounded-xl border border-emerald-800/80 bg-emerald-950/40 p-4 flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2 text-emerald-400 font-semibold text-xs">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>Xuất file thành công!</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {mode !== 'subs_only' && (
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="h-7 px-2.5 flex items-center gap-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white font-medium text-[11px] shadow transition"
+                    >
+                      <Play className="w-3 h-3 fill-current" />
+                      <span>Xem kết quả</span>
+                    </button>
+                  )}
                   <button
-                    onClick={onClose}
-                    className="flex items-center gap-1 bg-blue-700/70 hover:bg-blue-600 text-white px-2 py-1 rounded text-[11px] transition"
+                    type="button"
+                    onClick={() => onOpenFolder(outputPath)}
+                    className="h-7 px-2.5 flex items-center gap-1.5 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white font-medium text-[11px] shadow transition"
                   >
-                    <Play className="w-3 h-3" />
-                    <span>Xem kết quả</span>
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    <span>Mở thư mục</span>
                   </button>
-                )}
+                </div>
+              </div>
+
+              {/* Path display with copy button */}
+              <div className="flex items-center gap-2 bg-slate-950/60 border border-emerald-900/40 rounded-lg px-3 py-2 text-[11px] font-mono text-emerald-300">
+                <span className="flex-1 truncate select-all" title={outputPath}>
+                  {outputPath}
+                </span>
                 <button
-                  onClick={() => onOpenFolder(outputPath)}
-                  className="flex items-center gap-1 bg-emerald-800/60 hover:bg-emerald-800 text-white px-2 py-1 rounded text-[11px] transition"
+                  type="button"
+                  onClick={handleCopyPath}
+                  className="p-1 text-slate-400 hover:text-white transition rounded shrink-0"
+                  title="Copy đường dẫn"
                 >
-                  <FolderOpen className="w-3 h-3" />
-                  <span>Mở thư mục</span>
+                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
               </div>
             </div>
           )}
 
+          {/* Error Banner */}
           {errorMsg && (
-            <div className="bg-rose-950/50 border border-rose-800/80 rounded-lg p-3 text-rose-300">
-              {errorMsg}
+            <div className="rounded-xl border border-rose-800/80 bg-rose-950/40 p-4 flex items-start gap-2.5 text-rose-300 text-xs">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <div className="flex-1 leading-relaxed break-all">
+                {errorMsg}
+              </div>
             </div>
           )}
         </div>
 
         {/* Footer Actions */}
-        <div className="px-5 py-3.5 bg-slate-800/40 border-t border-slate-800 flex items-center justify-end gap-2.5">
+        <div className="px-6 py-4 bg-slate-950/40 border-t border-slate-800/80 flex items-center justify-end gap-3">
           <button
+            type="button"
             onClick={onClose}
             disabled={isExporting}
-            className="px-4 py-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition"
+            className="h-9 px-4 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition text-xs font-medium"
           >
             Đóng
           </button>
 
           <button
+            type="button"
             onClick={handleStartExport}
             disabled={isExporting || segments.length === 0}
-            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold px-5 py-1.5 rounded shadow transition"
+            className="h-9 px-5 flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold rounded-lg shadow-md shadow-emerald-950 transition text-xs cursor-pointer disabled:cursor-not-allowed"
           >
             {isExporting ? (
               <>
@@ -266,7 +356,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 <span>Đang render...</span>
               </>
             ) : (
-              <span>Render & Xuất Ngay</span>
+              <>
+                <Film className="w-3.5 h-3.5" />
+                <span>Render & Xuất Ngay</span>
+              </>
             )}
           </button>
         </div>

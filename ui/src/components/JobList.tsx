@@ -81,9 +81,9 @@ export const JobList: React.FC<JobListProps> = ({
 }) => {
   if (jobs.length === 0) {
     return (
-      <div className="h-full flex flex-col items-center justify-center gap-2 text-slate-600 text-[11px]">
-        <FileVideo className="w-8 h-8 opacity-30" />
-        <span className="italic">Chưa có file nào trong danh sách. Kéo thả hoặc chọn video để bắt đầu.</span>
+      <div className="h-full flex flex-col items-center justify-center gap-2 px-6 text-center text-slate-500 text-xs">
+        <FileVideo className="w-6 h-6 text-slate-600" />
+        <span>Chưa có file nào trong danh sách.</span>
       </div>
     );
   }

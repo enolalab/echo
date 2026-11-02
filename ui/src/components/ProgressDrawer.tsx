@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Terminal, ChevronUp, ChevronDown, CheckCircle2, Loader2, Copy, Check } from 'lucide-react';
+import { Terminal, ChevronUp, ChevronDown, ChevronRight, CheckCircle2, Loader2, Copy, Check, Clapperboard } from 'lucide-react';
 import type { PipelineStageEvent, PipelineProgressEvent } from '../types';
 
 interface ProgressDrawerProps {
@@ -74,7 +74,7 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
       {/* Status Bar */}
       <div className="h-12 px-4 flex items-center justify-between gap-4">
         {/* Stages breadcrumb */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           {STAGES.map((s, idx) => {
             const isDone = currentIndex > idx || (currentIndex === 3 && idx === 3);
             const isCurrent = currentIndex === idx && isRunning;
@@ -82,7 +82,7 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
             return (
               <React.Fragment key={s.key}>
                 <div
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border whitespace-nowrap ${
                     isDone
                       ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/50'
                       : isCurrent
@@ -100,14 +100,14 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
                   <span>{s.label}</span>
                 </div>
 
-                {idx < STAGES.length - 1 && <span className="text-slate-700">➔</span>}
+                {idx < STAGES.length - 1 && <ChevronRight className="w-3 h-3 text-slate-700 shrink-0" />}
               </React.Fragment>
             );
           })}
         </div>
 
         {/* Current status & Progress badge */}
-        <div className="flex-1 flex items-center justify-center gap-2 truncate px-2 font-mono text-[11px]">
+        <div className="flex-1 min-w-0 flex items-center justify-center gap-2 px-2 text-[11px]">
           {isRunning && (
             <span
               data-testid="progress-percentage-badge"
@@ -135,7 +135,7 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => setShowLogs(!showLogs)}
-            className="flex items-center gap-1 text-slate-400 hover:text-slate-200 bg-slate-800 px-2.5 py-1 rounded border border-slate-700 transition"
+            className="flex items-center gap-1.5 h-8 text-slate-400 hover:text-slate-200 hover:bg-slate-800 px-2.5 rounded-md border border-slate-700 transition"
           >
             <Terminal className="w-3.5 h-3.5" />
             <span>Logs ({logs.length})</span>
@@ -145,13 +145,14 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
           <button
             onClick={onOpenExport}
             disabled={!canExport || isRunning}
-            className={`font-semibold px-4 py-1.5 rounded-md shadow transition flex items-center gap-1.5 ${
+            className={`font-semibold h-8 px-4 rounded-md transition flex items-center gap-2 ${
               canExport && !isRunning
                 ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
-                : 'bg-slate-800 text-slate-600 border border-slate-700 cursor-not-allowed'
+                : 'bg-slate-800/60 text-slate-500 border border-slate-700 cursor-not-allowed'
             }`}
           >
-            <span>🎬 Xuất Video</span>
+            <Clapperboard className="w-3.5 h-3.5" />
+            <span>Xuất Video</span>
           </button>
         </div>
       </div>
