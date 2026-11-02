@@ -11,6 +11,10 @@ path = "src/lib.rs"
 name = "auto-subtitle-desktop"
 path = "src/main.rs"
 
+[features]
+# Re-export the lib's CUDA backend so `tauri build --features cuda` reaches whisper-rs.
+cuda = ["auto-subtitle/cuda"]
+
 [dependencies]
 auto-subtitle = { path = ".." }
 tauri = { version = "2.0", features = ["protocol-asset"] }

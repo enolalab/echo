@@ -1,8 +1,12 @@
 .PHONY: local dev-web build test test-rust test-ui install
 
+# CUDA toolkit present → compile whisper-rs GPU backend (tauri accepts -f/--features)
+NVCC := $(shell command -v nvcc 2>/dev/null)
+TAURI_FEATURES := $(if $(NVCC),--features cuda)
+
 # Desktop app in dev mode (Vite + Rust hot reload, native window)
 local:
-	npm run dev
+	npm run dev -- $(TAURI_FEATURES)
 
 # Browser-only dev server with mocked IPC (no Rust build)
 dev-web:
@@ -10,7 +14,7 @@ dev-web:
 
 # Production frontend build + desktop bundle
 build:
-	npm run build:app
+	npm run build:app -- $(TAURI_FEATURES)
 
 test: test-rust test-ui
 
