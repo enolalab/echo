@@ -9,6 +9,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use tokio::io::AsyncWriteExt;
 
 use crate::config::AppConfig;
+use crate::tts::{VoiceInfo, HF_VOICES_BASE};
 
 pub const WHISPER_MODELS: &[&str] = &[
     "tiny",
@@ -174,6 +175,131 @@ impl DependencyManager {
 
         Ok(bin_ffmpeg)
     }
+
+    /// Piper bundle dir: <bin_dir>/piper/ containing binary + lib/ + espeak-ng-data/.
+    pub fn piper_bundle_dir(&self) -> PathBuf {
+        self.config.bin_dir.join("piper")
+    }
+
+    pub fn find_piper(&self) -> Option<PathBuf> {
+        if let Ok(p) = which::which("piper") {
+            return Some(p);
+        }
+        #[cfg(windows)]
+        let exe = self.piper_bundle_dir().join("piper.exe");
+        #[cfg(not(windows))]
+        let exe = self.piper_bundle_dir().join("piper");
+        exe.is_file().then_some(exe)
+    }
+
+    /// Auto-download supported where a tar.gz asset exists (Linux x86_64, macOS
+    /// x64/aarch64). Windows ships a .zip — install piper manually so it's on PATH.
+    /// Pinned to tag 2023.11.14-2 (rhasspy/piper redirects to OHF-Voice/piper1-gpl,
+    /// whose latest releases are the Python package, not the C++ binary bundles).
+    pub async fn find_or_download_piper(&self) -> Result<PathBuf> {
+        if let Some(p) = self.find_piper() {
+            return Ok(p);
+        }
+        const TAG: &str = "https://github.com/rhasspy/piper/releases/download/2023.11.14-2";
+        let url = match (std::env::consts::OS, std::env::consts::ARCH) {
+            ("linux", "x86_64") => format!("{TAG}/piper_linux_x86_64.tar.gz"),
+            ("macos", "x86_64") => format!("{TAG}/piper_macos_x64.tar.gz"),
+            ("macos", "aarch64") => format!("{TAG}/piper_macos_aarch64.tar.gz"),
+            (os, arch) => anyhow::bail!(
+                "Automatic Piper download is not supported on {os}/{arch} \
+                 (Windows bundles a .zip). Install piper manually and ensure it is in your PATH."
+            ),
+        };
+
+        let temp_dir = tempfile::tempdir().context("failed to create temp dir for piper")?;
+        let archive = temp_dir.path().join("piper.tar.gz");
+        download_to(&self.client, &url, &archive).await?;
+
+        let status = tokio::process::Command::new("tar")
+            .arg("-xzf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(temp_dir.path())
+            .status()
+            .await
+            .context("failed to run tar -xzf on piper archive")?;
+        if !status.success() {
+            anyhow::bail!("tar extraction failed with status: {status}");
+        }
+
+        // Archive extracts to a `piper/` directory — preserve the whole bundle.
+        let extracted = temp_dir.path().join("piper");
+        anyhow::ensure!(
+            extracted.is_dir(),
+            "piper archive did not contain piper/ directory"
+        );
+        let dest = self.piper_bundle_dir();
+        if dest.exists() {
+            fs::remove_dir_all(&dest)
+                .with_context(|| format!("failed to clear {}", dest.display()))?;
+        }
+        fs::create_dir_all(&self.config.bin_dir)?;
+        if fs::rename(&extracted, &dest).is_err() {
+            copy_dir_all(&extracted, &dest)?;
+        }
+
+        #[cfg(unix)]
+        {
+            let exe = dest.join("piper");
+            fs::set_permissions(&exe, fs::Permissions::from_mode(0o755))
+                .with_context(|| format!("failed to chmod 0755 {}", exe.display()))?;
+        }
+        let out = tokio::process::Command::new(dest.join("piper"))
+            .arg("--version")
+            .output()
+            .await
+            .context("failed to verify piper binary")?;
+        if !out.status.success() {
+            let _ = fs::remove_dir_all(&dest);
+            anyhow::bail!("downloaded piper failed --version check");
+        }
+        Ok(dest.join("piper"))
+    }
+
+    /// Paths for voice files: <tts_dir>/<id>.onnx and <id>.onnx.json.
+    pub fn voice_paths(&self, voice_id: &str) -> (PathBuf, PathBuf) {
+        (
+            self.config.tts_dir.join(format!("{voice_id}.onnx")),
+            self.config.tts_dir.join(format!("{voice_id}.onnx.json")),
+        )
+    }
+
+    pub async fn ensure_voice(&self, voice: &VoiceInfo) -> Result<(PathBuf, PathBuf)> {
+        let (onnx, json) = self.voice_paths(voice.id);
+        if !onnx.is_file() {
+            let url = format!("{HF_VOICES_BASE}/{}/{id}.onnx", voice.hf_dir, id = voice.id);
+            download_to(&self.client, &url, &onnx).await?;
+        }
+        if !json.is_file() {
+            let url = format!(
+                "{HF_VOICES_BASE}/{}/{id}.onnx.json",
+                voice.hf_dir,
+                id = voice.id
+            );
+            download_to(&self.client, &url, &json).await?;
+        }
+        Ok((onnx, json))
+    }
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let to = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &to)?;
+        } else {
+            fs::copy(entry.path(), &to)?;
+        }
+    }
+    Ok(())
 }
 
 pub async fn download_to(client: &reqwest::Client, url: &str, dest: &Path) -> Result<()> {
@@ -264,4 +390,18 @@ pub async fn download_to(client: &reqwest::Client, url: &str, dest: &Path) -> Re
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn voice_paths_layout() {
+        let cfg = AppConfig::with_base(std::env::temp_dir().join("as-test-dl")).unwrap();
+        let dm = DependencyManager::new(cfg);
+        let (o, j) = dm.voice_paths("vi_VN-vais1000-medium");
+        assert!(o.ends_with("vi_VN-vais1000-medium.onnx"));
+        assert!(j.ends_with("vi_VN-vais1000-medium.onnx.json"));
+    }
 }
