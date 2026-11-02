@@ -404,7 +404,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <input
                   aria-label="Thư mục lưu video tải về"
                   value={general.download_dir ?? ''}
-                  placeholder="~/Videos/auto-subtitle/downloads"
+                  placeholder="~/Echo Studio/input"
                   onChange={(e) =>
                     patchGeneral({ download_dir: e.target.value.trim() || null })
                   }

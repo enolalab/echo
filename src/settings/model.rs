@@ -80,7 +80,7 @@ pub struct GeneralSettings {
     pub bilingual: bool,
     pub style_preset: String,
     pub use_cloud_stt: bool,
-    /// Custom YouTube download directory. `None` → ~/Videos/auto-subtitle/downloads/
+    /// Custom YouTube download directory. `None` → ~/Echo Studio/input/
     pub download_dir: Option<String>,
 }
 

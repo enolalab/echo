@@ -47,12 +47,10 @@ pub async fn cancel_youtube_download(state: State<'_, AppState>) -> Result<(), S
 }
 
 fn default_download_dir() -> PathBuf {
-    dirs::video_dir()
-        .or_else(dirs::download_dir)
-        .or_else(dirs::data_local_dir)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("auto-subtitle")
-        .join("downloads")
+    dirs::home_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("Echo Studio")
+        .join("input")
 }
 
 async fn find_existing_download(output_dir: &Path, video_id: &str) -> Option<PathBuf> {

@@ -101,7 +101,7 @@ fn unknown_fields_and_missing_sections_tolerated() {
 
 #[test]
 fn download_dir_defaults_to_none_and_roundtrips() {
-    // None means the backend falls back to ~/Videos/auto-subtitle/downloads/
+    // None means the backend falls back to ~/Echo Studio/input/
     assert_eq!(GeneralSettings::default().download_dir, None);
 
     let s: Settings = serde_json::from_str(r#"{"version":1}"#).unwrap();
