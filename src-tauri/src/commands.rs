@@ -673,6 +673,16 @@ pub async fn get_output_dir() -> Result<String, String> {
 }
 
 #[tauri::command]
+pub async fn pick_directory(title: Option<String>) -> Result<Option<String>, String> {
+    let mut dialog = rfd::AsyncFileDialog::new();
+    if let Some(t) = title {
+        dialog = dialog.set_title(&t);
+    }
+    let dir = dialog.pick_folder().await;
+    Ok(dir.map(|d| d.path().to_string_lossy().to_string()))
+}
+
+#[tauri::command]
 pub async fn pick_save_file(default_name: String, extension: String) -> Result<Option<String>, String> {
     let file = rfd::AsyncFileDialog::new()
         .set_file_name(&default_name)

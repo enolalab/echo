@@ -80,6 +80,8 @@ pub struct GeneralSettings {
     pub bilingual: bool,
     pub style_preset: String,
     pub use_cloud_stt: bool,
+    /// Custom YouTube download directory. `None` → ~/Videos/auto-subtitle/downloads/
+    pub download_dir: Option<String>,
 }
 
 impl Default for GeneralSettings {
@@ -90,6 +92,7 @@ impl Default for GeneralSettings {
             bilingual: true,
             style_preset: "youtube_yellow".into(),
             use_cloud_stt: false,
+            download_dir: None,
         }
     }
 }

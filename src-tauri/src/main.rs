@@ -26,6 +26,7 @@ fn main() {
             pick_video_file,
             pick_video_files,
             get_output_dir,
+            pick_directory,
             pick_save_file,
             get_settings,
             save_profile,

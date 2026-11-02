@@ -98,3 +98,17 @@ fn unknown_fields_and_missing_sections_tolerated() {
     assert!(s.profiles.is_empty());
     assert_eq!(s.general, GeneralSettings::default());
 }
+
+#[test]
+fn download_dir_defaults_to_none_and_roundtrips() {
+    // None means the backend falls back to ~/Videos/auto-subtitle/downloads/
+    assert_eq!(GeneralSettings::default().download_dir, None);
+
+    let s: Settings = serde_json::from_str(r#"{"version":1}"#).unwrap();
+    assert_eq!(s.general.download_dir, None);
+
+    let json = r#"{"general":{"download_dir":"/tmp/ytdl"}}"#;
+    let s: Settings = serde_json::from_str(json).unwrap();
+    assert_eq!(s.general.download_dir.as_deref(), Some("/tmp/ytdl"));
+    assert!(serde_json::to_string(&s.general).unwrap().contains("/tmp/ytdl"));
+}

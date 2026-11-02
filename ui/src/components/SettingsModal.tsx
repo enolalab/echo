@@ -399,6 +399,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <span>Phụ đề song ngữ</span>
             </label>
             <label className="flex flex-col gap-1">
+              <span>Thư mục lưu video tải về</span>
+              <div className="flex gap-2">
+                <input
+                  aria-label="Thư mục lưu video tải về"
+                  value={general.download_dir ?? ''}
+                  placeholder="~/Videos/auto-subtitle/downloads"
+                  onChange={(e) =>
+                    patchGeneral({ download_dir: e.target.value.trim() || null })
+                  }
+                  className={inputCls}
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const dir = await ipc.pickDirectory('Chọn thư mục lưu video YouTube');
+                      if (dir) patchGeneral({ download_dir: dir });
+                    } catch {
+                      // Dialog unavailable — keep manual input
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 shrink-0"
+                >
+                  Chọn...
+                </button>
+              </div>
+            </label>
+            <label className="flex flex-col gap-1">
               <span>Style mặc định</span>
               <select
                 aria-label="Style mặc định"

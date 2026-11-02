@@ -164,6 +164,13 @@ export async function getOutputDir(): Promise<string> {
   return await invoke<string>('get_output_dir');
 }
 
+export async function pickDirectory(title?: string): Promise<string | null> {
+  if (!isTauri()) {
+    return null;
+  }
+  return await invoke<string | null>('pick_directory', { title: title ?? null });
+}
+
 export async function pickSaveFile(defaultName: string, extension: string): Promise<string | null> {
   if (!isTauri()) {
     return null;
