@@ -74,6 +74,7 @@ async fn test_translate_all_invokes_progress_callback() {
         &mut s,
         "en",
         "vi",
+        1,
         Some(|done, total| {
             recorded.push((done, total));
         }),

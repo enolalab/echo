@@ -49,7 +49,8 @@ impl ChatClient for OllamaChatClient {
         let body = json!({
             "model": self.model,
             "stream": false,
-            "options": {"temperature": 0.2},
+            "keep_alive": "30m",
+            "options": {"temperature": 0.2, "num_ctx": 4096},
             "messages": messages
         });
         let resp: ChatResponse = send_json(self.client.post(&url).json(&body), &url).await?;

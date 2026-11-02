@@ -23,6 +23,7 @@ const { loaded, saveGeneral } = vi.hoisted(() => {
       tts_model: null,
       dub_orig_volume: 0.15,
       render_speed: 'balanced' as const,
+      translate_concurrency: 4,
     },
     presets: [{ id: 'builtin:math', name: 'Toán học', description: '', system_prompt: 'p', glossary: [] }],
     skills: [],

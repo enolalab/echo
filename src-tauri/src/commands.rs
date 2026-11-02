@@ -453,12 +453,18 @@ async fn run_pipeline(
             );
         };
 
+        let concurrency = settings
+            .lock()
+            .map(|st| st.settings().general.translate_concurrency)
+            .unwrap_or(4);
+
         let translate_res = tokio::select! {
             res = auto_subtitle::pipeline::translate_all_with_progress(
                 translator.as_ref(),
                 &mut segments_to_translate,
                 "auto",
                 &target_lang,
+                concurrency,
                 Some(on_progress),
             ) => Some(res),
             _ = cancel_rx.recv() => None,

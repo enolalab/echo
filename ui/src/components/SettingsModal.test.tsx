@@ -17,6 +17,7 @@ const general: GeneralSettings = {
   tts_model: null,
   dub_orig_volume: 0.15,
   render_speed: 'balanced',
+  translate_concurrency: 4,
 };
 
 const view = (over: Partial<SettingsView> = {}): SettingsView => ({

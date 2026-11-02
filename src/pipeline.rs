@@ -136,14 +136,15 @@ pub fn resolve_output_paths(cli: &Cli) -> anyhow::Result<OutputPaths> {
     Ok(OutputPaths { video, srt, ass })
 }
 
-/// Batches of BATCH_SIZE; each batch retried up to MAX_ATTEMPTS; after that Err("translation failed for lines a–b: ...").
+/// Batches of BATCH_SIZE translated with up to `concurrency` in-flight requests;
+/// each batch retried up to MAX_ATTEMPTS; after that Err("translation failed for lines a–b: ...").
 pub async fn translate_all(
     t: &dyn Translator,
     segs: &mut [SubtitleSegment],
     src: &str,
     tgt: &str,
 ) -> anyhow::Result<()> {
-    translate_all_with_progress(t, segs, src, tgt, None::<fn(usize, usize)>).await
+    translate_all_with_progress(t, segs, src, tgt, 1, None::<fn(usize, usize)>).await
 }
 
 pub async fn translate_all_with_progress<F>(
@@ -151,11 +152,16 @@ pub async fn translate_all_with_progress<F>(
     segs: &mut [SubtitleSegment],
     src: &str,
     tgt: &str,
-    mut on_progress: Option<F>,
+    concurrency: usize,
+    on_progress: Option<F>,
 ) -> anyhow::Result<()>
 where
     F: FnMut(usize, usize) + Send,
 {
+    use futures_util::{stream, StreamExt};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
     if segs.is_empty() {
         return Ok(());
     }
@@ -168,88 +174,57 @@ where
     );
 
     let total_len = segs.len();
-    let mut done_len = 0;
+    // Chunks cloned out of segs so the futures can run concurrently
+    // without holding overlapping &mut borrows.
+    let jobs: Vec<(usize, usize, Vec<SubtitleSegment>)> = segs
+        .chunks(BATCH_SIZE)
+        .map(|c| {
+            (
+                c.first().map(|s| s.id).unwrap_or(1),
+                c.last().map(|s| s.id).unwrap_or(1),
+                c.to_vec(),
+            )
+        })
+        .collect();
 
-    for chunk in segs.chunks_mut(BATCH_SIZE) {
-        let start_line = chunk.first().map(|s| s.id).unwrap_or(1);
-        let end_line = chunk.last().map(|s| s.id).unwrap_or(start_line);
-        let chunk_len = chunk.len();
+    // Shared progress state — must be Send because callers wrap this
+    // future in tokio::select!/spawn (GUI cancel support).
+    let done = Arc::new(AtomicUsize::new(0));
+    let cb: Arc<Mutex<Option<F>>> = Arc::new(Mutex::new(on_progress));
 
-        // Small local models often drop lines in large batches; on
-        // parse/validation failures keep halving the batch until it
-        // succeeds or a single line still fails.
-        let mut parts: Vec<&mut [SubtitleSegment]> = vec![chunk];
-        let mut chunk_err: Option<anyhow::Error> = None;
-
-        'parts: while let Some(part) = parts.pop() {
-            let mut last_err = None;
-            let mut fatal = false;
-            let mut splittable = false;
-
-            for attempt in 1..=MAX_ATTEMPTS {
-                match t.translate_batch(part, src, tgt).await {
-                    Ok(translated_lines) => {
-                        if translated_lines.len() != part.len() {
-                            last_err = Some(anyhow::anyhow!(
-                                "expected {} translated lines, got {}",
-                                part.len(),
-                                translated_lines.len()
-                            ));
-                            splittable = true;
-                            continue;
-                        }
-                        for (seg, trans) in part.iter_mut().zip(translated_lines) {
-                            seg.translated_text = Some(trans);
-                        }
-                        continue 'parts;
-                    }
-                    Err(err) => {
-                        let llm_err = err
-                            .chain()
-                            .find_map(|e| e.downcast_ref::<crate::llm::LlmError>())
-                            .cloned();
-                        last_err = Some(err);
-                        match llm_err {
-                            Some(le) if !le.is_retryable() => {
-                                fatal = true;
-                                break;
-                            }
-                            Some(le) => {
-                                splittable = false;
-                                if le.should_backoff() && attempt < MAX_ATTEMPTS {
-                                    tokio::time::sleep(std::time::Duration::from_secs(
-                                        2 * attempt as u64,
-                                    ))
-                                    .await;
-                                }
-                            }
-                            None => splittable = true,
-                        }
+    let results: Vec<(usize, usize, anyhow::Result<Vec<String>>)> = stream::iter(jobs)
+        .map(|(start_line, end_line, chunk)| {
+            let done = done.clone();
+            let cb = cb.clone();
+            let pb = pb.clone();
+            async move {
+                let res = translate_chunk(t, &chunk, src, tgt).await;
+                if res.is_ok() {
+                    let n = done.fetch_add(chunk.len(), Ordering::Relaxed) + chunk.len();
+                    pb.inc(chunk.len() as u64);
+                    if let Some(f) = cb.lock().unwrap().as_mut() {
+                        f(n, total_len);
                     }
                 }
+                (start_line, end_line, res)
             }
+        })
+        .buffered(concurrency.max(1))
+        .collect()
+        .await;
 
-            if !fatal && splittable && part.len() > 1 {
-                let mid = part.len() / 2;
-                let (left, right) = part.split_at_mut(mid);
-                parts.push(right);
-                parts.push(left);
-                continue 'parts;
-            }
-
-            chunk_err = Some(last_err.unwrap_or_else(|| anyhow::anyhow!("unknown error")));
-            break;
-        }
-
-        match chunk_err {
-            None => {
-                pb.inc(chunk_len as u64);
-                done_len += chunk_len;
-                if let Some(ref mut cb) = on_progress {
-                    cb(done_len, total_len);
+    // .buffered preserves input order — apply results sequentially.
+    let mut offset = 0usize;
+    for (start_line, end_line, res) in results {
+        match res {
+            Ok(lines) => {
+                let n = lines.len();
+                for (seg, line) in segs[offset..offset + n].iter_mut().zip(lines) {
+                    seg.translated_text = Some(line);
                 }
+                offset += n;
             }
-            Some(err) => {
+            Err(err) => {
                 pb.finish_and_clear();
                 anyhow::bail!("translation failed for lines {start_line}–{end_line}: {err:#}");
             }
@@ -258,6 +233,80 @@ where
 
     pb.finish_and_clear();
     Ok(())
+}
+
+/// Translate one chunk with retry; on parse/validation failures halve the
+/// batch until it succeeds or a single line still fails. Returns lines
+/// aligned 1:1 with `chunk`.
+async fn translate_chunk(
+    t: &dyn Translator,
+    chunk: &[SubtitleSegment],
+    src: &str,
+    tgt: &str,
+) -> anyhow::Result<Vec<String>> {
+    let mut out: Vec<Option<String>> = vec![None; chunk.len()];
+    let mut parts: Vec<(&[SubtitleSegment], usize)> = vec![(chunk, 0)];
+
+    'parts: while let Some((part, off)) = parts.pop() {
+        let mut last_err = None;
+        let mut fatal = false;
+        let mut splittable = false;
+
+        for attempt in 1..=MAX_ATTEMPTS {
+            match t.translate_batch(part, src, tgt).await {
+                Ok(translated_lines) => {
+                    if translated_lines.len() != part.len() {
+                        last_err = Some(anyhow::anyhow!(
+                            "expected {} translated lines, got {}",
+                            part.len(),
+                            translated_lines.len()
+                        ));
+                        splittable = true;
+                        continue;
+                    }
+                    for (dst, line) in out[off..off + part.len()].iter_mut().zip(translated_lines) {
+                        *dst = Some(line);
+                    }
+                    continue 'parts;
+                }
+                Err(err) => {
+                    let llm_err = err
+                        .chain()
+                        .find_map(|e| e.downcast_ref::<crate::llm::LlmError>())
+                        .cloned();
+                    last_err = Some(err);
+                    match llm_err {
+                        Some(le) if !le.is_retryable() => {
+                            fatal = true;
+                            break;
+                        }
+                        Some(le) => {
+                            splittable = false;
+                            if le.should_backoff() && attempt < MAX_ATTEMPTS {
+                                tokio::time::sleep(std::time::Duration::from_secs(
+                                    2 * attempt as u64,
+                                ))
+                                .await;
+                            }
+                        }
+                        None => splittable = true,
+                    }
+                }
+            }
+        }
+
+        if !fatal && splittable && part.len() > 1 {
+            let mid = part.len() / 2;
+            let (left, right) = part.split_at(mid);
+            parts.push((right, off + mid));
+            parts.push((left, off));
+            continue 'parts;
+        }
+
+        return Err(last_err.unwrap_or_else(|| anyhow::anyhow!("unknown error")));
+    }
+
+    Ok(out.into_iter().map(|o| o.unwrap_or_default()).collect())
 }
 
 pub struct Deps<'a> {
@@ -351,11 +400,13 @@ pub async fn run(cli: &Cli, deps: Deps<'_>) -> anyhow::Result<Report> {
             segments.len()
         ));
         sp.enable_steady_tick(std::time::Duration::from_millis(100));
-        translate_all(
+        translate_all_with_progress(
             translator,
             &mut segments,
             &cli.source_lang,
             &cli.target_lang,
+            cli.translate_concurrency,
+            None::<fn(usize, usize)>,
         )
         .await?;
         sp.finish_and_clear();

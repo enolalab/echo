@@ -134,6 +134,8 @@ export interface GeneralSettings {
   tts_model?: string | null;
   dub_orig_volume: number;
   render_speed: RenderSpeed;
+  /** Max concurrent LLM translation requests (1 = sequential). */
+  translate_concurrency: number;
 }
 
 export interface SettingsView {

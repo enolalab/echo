@@ -100,6 +100,9 @@ pub struct GeneralSettings {
     /// Render speed preset: "fast" | "balanced" | "quality" (hardsub only)
     #[serde(default = "default_render_speed")]
     pub render_speed: String,
+    /// Max concurrent LLM translation requests (1 = sequential)
+    #[serde(default = "default_translate_concurrency")]
+    pub translate_concurrency: usize,
 }
 
 fn default_tts_engine() -> String {
@@ -118,6 +121,10 @@ fn default_render_speed() -> String {
     "balanced".into()
 }
 
+fn default_translate_concurrency() -> usize {
+    4
+}
+
 impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
@@ -134,6 +141,7 @@ impl Default for GeneralSettings {
             tts_model: None,
             dub_orig_volume: default_dub_orig_volume(),
             render_speed: default_render_speed(),
+            translate_concurrency: default_translate_concurrency(),
         }
     }
 }

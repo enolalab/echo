@@ -109,6 +109,10 @@ pub struct Cli {
     #[arg(long, value_parser = ["fast", "balanced", "quality"], default_value = "balanced")]
     pub render_speed: String,
 
+    /// Max concurrent translation requests (API: 4-8; local Ollama depends on server parallelism)
+    #[arg(long, default_value_t = 4)]
+    pub translate_concurrency: usize,
+
     /// Dub translated subtitles into a synthesized voice track
     #[arg(long)]
     pub dub: bool,

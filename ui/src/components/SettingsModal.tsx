@@ -472,6 +472,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <option value="quality">Đẹp (chậm hơn)</option>
               </select>
             </label>
+            <label className="flex flex-col gap-1">
+              <span>Dịch song song (request cùng lúc)</span>
+              <select
+                aria-label="Dịch song song"
+                value={general.translate_concurrency}
+                onChange={(e) => patchGeneral({ translate_concurrency: Number(e.target.value) })}
+                className={inputCls}
+              >
+                <option value={1}>1 — tuần tự</option>
+                <option value={2}>2</option>
+                <option value={4}>4 — khuyến nghị</option>
+                <option value={6}>6</option>
+                <option value={8}>8 — tối đa (chỉ nên dùng với API)</option>
+              </select>
+            </label>
 
             <div className="flex flex-col gap-2 rounded border border-slate-700/60 bg-slate-900/40 p-3">
               <span className="font-semibold text-slate-300 flex items-center gap-1.5">
