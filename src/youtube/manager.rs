@@ -55,6 +55,24 @@ impl YtDlpManager {
         None
     }
 
+    /// Locate an ffmpeg binary for yt-dlp post-processing (merging streams).
+    /// Order: system PATH → app's managed binary (downloaded by the pipeline
+    /// into the cache bin dir) → the yt-dlp app bin dir as a last resort.
+    pub fn resolve_ffmpeg(&self) -> Option<PathBuf> {
+        if let Ok(path) = which::which("ffmpeg") {
+            return Some(path);
+        }
+        let bin_name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+        [
+            dirs::cache_dir(),
+            dirs::data_local_dir(),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|d| d.join("auto-subtitle").join("bin").join(bin_name))
+        .find(|p| p.is_file())
+    }
+
     pub async fn check_status(&self) -> YtDlpStatus {
         let bin_path = self.resolve_binary();
         match bin_path {
@@ -186,16 +204,26 @@ impl YtDlpManager {
             .to_string_lossy()
             .to_string();
 
-        let mut child = Command::new(&bin_path)
-            .arg("-f")
-            .arg("bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b")
+        // Prefer H.264 video + AAC audio so the merged MP4 plays in HTML5
+        // <video> (WebKitGTK can't decode YouTube's AV1 f399-style streams).
+        // Falls back to a progressive MP4 (avc1+aac built in, no merge needed)
+        // and finally to any single-file best.
+        let mut cmd = Command::new(&bin_path);
+        cmd.arg("-f")
+            .arg("bv*[vcodec^=avc1]+ba[acodec^=mp4a]/b[ext=mp4]/b")
             .arg("--merge-output-format")
             .arg("mp4")
             .arg("-o")
             .arg(&out_template)
             .arg("--newline")
             .arg("--progress-template")
-            .arg("%(progress.downloaded_bytes)d %(progress.total_bytes)d %(progress.speed)f %(progress.eta)d")
+            .arg("%(progress.downloaded_bytes)d %(progress.total_bytes)d %(progress.speed)f %(progress.eta)d");
+
+        if let Some(ffmpeg) = self.resolve_ffmpeg() {
+            cmd.arg("--ffmpeg-location").arg(&ffmpeg);
+        }
+
+        let mut child = cmd
             .arg(&item.webpage_url)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -248,12 +276,19 @@ impl YtDlpManager {
             }
         }
 
-        // Fallback: search any file containing item.id
+        // Fallback: any non-temp .mp4 containing item.id. Names like
+        // "[id].f399.mp4" are per-format temp files (often video-only) left
+        // behind when merging failed — never hand those to the pipeline.
+        let id_tag = format!("[{}]", item.id);
+        let temp_tag = format!("[{}].f", item.id);
         let mut entries = tokio::fs::read_dir(output_dir).await?;
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.contains(&item.id) && !name.ends_with(".part") && !name.ends_with(".ytdl") {
+                if name.contains(&id_tag)
+                    && name.ends_with(".mp4")
+                    && !name.contains(&temp_tag)
+                {
                     return Ok(path);
                 }
             }
