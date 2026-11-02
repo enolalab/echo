@@ -12,6 +12,22 @@ use state::AppState;
 use youtube_commands::*;
 
 fn main() {
+    // Linux/WebKitGTK: <video> playback is routed through GStreamer, which has
+    // no handler for the `asset://` scheme produced by convertFileSrc —
+    // resulting in MEDIA_ERR_SRC_NOT_SUPPORTED (error 4). WebKitGTK >= 2.38
+    // allows whitelisting extra URI protocols via this env var.
+    #[cfg(target_os = "linux")]
+    match std::env::var("WEBKIT_GST_ALLOWED_URI_PROTOCOLS") {
+        Ok(existing) if !existing.split(':').any(|p| p == "asset") => {
+            std::env::set_var(
+                "WEBKIT_GST_ALLOWED_URI_PROTOCOLS",
+                format!("{existing}:asset"),
+            );
+        }
+        Err(_) => std::env::set_var("WEBKIT_GST_ALLOWED_URI_PROTOCOLS", "asset"),
+        _ => {}
+    }
+
     let settings = auto_subtitle::settings::SettingsStore::open_default()
         .expect("Không mở được thư mục cài đặt");
     tauri::Builder::default()
