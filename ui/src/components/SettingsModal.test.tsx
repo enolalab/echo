@@ -130,9 +130,10 @@ describe('SettingsModal', () => {
     renderModal();
     pickProfile('DeepSeek');
     await waitFor(() => expect(api.listProfileModels).toHaveBeenCalled());
-    await waitFor(() =>
-      expect(document.querySelector('datalist#model-suggestions option[value="deepseek-reasoner"]')).not.toBeNull()
-    );
+    await waitFor(() => {
+      const select = screen.getByLabelText('Model') as HTMLSelectElement;
+      expect([...select.options].some((o) => o.value === 'deepseek-reasoner')).toBe(true);
+    });
   });
 
   it('has a Skills tab', () => {

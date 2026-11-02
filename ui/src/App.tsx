@@ -299,12 +299,16 @@ export default function App() {
     }
   };
 
+  const stopQueueRef = useRef(false);
+
   // Run queued jobs sequentially — one file at a time
   const handleStart = async () => {
+    stopQueueRef.current = false;
     const queued = jobsRef.current.filter(
       (j) => j.status === 'queued' || j.status === 'error' || j.status === 'cancelled'
     );
     for (const job of queued) {
+      if (stopQueueRef.current) break;
       await runJob(job);
       // Stop the queue entirely when the current job was cancelled
       const finished = jobsRef.current.find((j) => j.id === job.id);
@@ -312,21 +316,21 @@ export default function App() {
     }
   };
 
-  const handleCancel = async () => {
-    try {
-      await cancelPipeline();
-    } catch (err) {
-      console.error('Cancel failed:', err);
-    }
-  };
-
-  const handleCancelJob = async (id: string) => {
+  // Cancel the running job AND mark every pending item cancelled
+  const cancelQueue = async (id?: string) => {
+    stopQueueRef.current = true;
     try {
       await cancelPipeline(id);
     } catch (err) {
-      console.error('Cancel job failed:', err);
+      console.error('Cancel failed:', err);
     }
+    setJobs((prev) =>
+      prev.map((j) => (j.status === 'queued' ? { ...j, status: 'cancelled' } : j))
+    );
   };
+
+  const handleCancel = () => cancelQueue();
+  const handleCancelJob = (id: string) => cancelQueue(id);
 
   // Subtitle editor operations — applied to the selected job
   const updateSelectedSegments = (fn: (segs: SubtitleSegment[]) => SubtitleSegment[]) => {

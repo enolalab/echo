@@ -280,18 +280,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <RefreshCw className="w-3.5 h-3.5" />
                   </button>
                 </span>
-                <input
-                  aria-label="Model"
-                  list="model-suggestions"
-                  value={form.model}
-                  onChange={(e) => setForm({ ...form, model: e.target.value })}
-                  className={inputCls}
-                />
-                <datalist id="model-suggestions">
-                  {models.map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
+                {models.length > 0 ? (
+                  <select
+                    aria-label="Model"
+                    value={form.model}
+                    onChange={(e) => setForm({ ...form, model: e.target.value })}
+                    className={inputCls}
+                  >
+                    {[...new Set([form.model, ...models].filter(Boolean))].map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    aria-label="Model"
+                    value={form.model}
+                    onChange={(e) => setForm({ ...form, model: e.target.value })}
+                    className={inputCls}
+                  />
+                )}
               </div>
 
               {testResult && (
