@@ -6,6 +6,7 @@ import {
   ClipboardPaste,
   AlertCircle,
   CheckCircle2,
+  Check,
   Download,
   Film,
 } from 'lucide-react';
@@ -327,19 +328,38 @@ export const YoutubeImportModal: React.FC<YoutubeImportModalProps> = ({
                 {result.items.map((item, idx) => (
                   <label
                     key={item.id}
-                    className={`flex items-center gap-3 px-2.5 py-2 rounded-lg border cursor-pointer transition-colors ${
+                    className={`group flex items-center gap-3 px-2.5 py-2 rounded-lg border cursor-pointer transition-colors ${
                       selected.has(item.id)
                         ? 'bg-slate-800/70 border-slate-600'
                         : 'bg-slate-900/40 border-slate-800 hover:border-slate-700'
                     }`}
                   >
                     {result.is_playlist && (
-                      <input
-                        type="checkbox"
-                        checked={selected.has(item.id)}
-                        onChange={() => toggleItem(item.id)}
-                        className="w-4 h-4 accent-red-500 shrink-0"
-                      />
+                      <>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(item.id)}
+                          onChange={() => toggleItem(item.id)}
+                          className="sr-only peer"
+                        />
+                        <span
+                          aria-hidden="true"
+                          className={`w-5 h-5 shrink-0 rounded-md border-2 flex items-center justify-center transition-all duration-150 peer-focus-visible:ring-2 peer-focus-visible:ring-red-500/60 peer-focus-visible:ring-offset-1 peer-focus-visible:ring-offset-slate-900 ${
+                            selected.has(item.id)
+                              ? 'border-red-500 bg-gradient-to-br from-red-500 to-rose-600 shadow-sm shadow-red-950/60'
+                              : 'border-slate-600 bg-slate-900/70 group-hover:border-slate-400'
+                          }`}
+                        >
+                          <Check
+                            strokeWidth={3.5}
+                            className={`w-3 h-3 text-white transition-all duration-150 ${
+                              selected.has(item.id)
+                                ? 'opacity-100 scale-100'
+                                : 'opacity-0 scale-50'
+                            }`}
+                          />
+                        </span>
+                      </>
                     )}
                     <span className="w-6 text-[11px] text-slate-500 text-right shrink-0">
                       {idx + 1}
