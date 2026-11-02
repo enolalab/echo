@@ -50,6 +50,7 @@ export default function App() {
     bilingual: true,
     style_preset: 'youtube_yellow',
     use_cloud_stt: false,
+    dub_enabled: false,
     tts_engine: 'local',
     tts_voice: null,
     tts_model: null,
@@ -598,12 +599,16 @@ export default function App() {
         segments={segments}
         initialPreset={stylePreset}
         initialBilingual={bilingual}
-        dubDefaults={{
-          engine: general.tts_engine,
-          voice: general.tts_voice,
-          model: general.tts_model,
-          original_volume: general.dub_orig_volume,
-        }}
+        dubDefaults={
+          general.dub_enabled
+            ? {
+                engine: general.tts_engine,
+                voice: general.tts_voice,
+                model: general.tts_model,
+                original_volume: general.dub_orig_volume,
+              }
+            : undefined
+        }
         onExport={exportSubtitles}
         onOpenFolder={openInFileManager}
         onExported={(path) => {

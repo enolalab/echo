@@ -742,6 +742,21 @@ pub async fn export_subtitles_core(
             None
         };
 
+    // Signal the render stage so the export dialog can advance its step UI.
+    if request.job_id.is_some() {
+        if let Some(a) = &app {
+            let _ = a.emit(
+                "export-progress",
+                ExportProgress {
+                    job_id: request.job_id.clone(),
+                    stage: "rendering".into(),
+                    index: 0,
+                    total: 0,
+                },
+            );
+        }
+    }
+
     match request.mode {
         ExportMode::SubsOnly => {
             let srt_content = render_srt(&request.segments, request.bilingual);

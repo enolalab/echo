@@ -82,6 +82,9 @@ pub struct GeneralSettings {
     pub use_cloud_stt: bool,
     /// Custom YouTube download directory. `None` → ~/Echo Studio/input/
     pub download_dir: Option<String>,
+    /// Master switch: show dubbing option in the export dialog.
+    #[serde(default)]
+    pub dub_enabled: bool,
     /// "local" (Piper) | "api" (OpenAI-compatible /audio/speech)
     #[serde(default = "default_tts_engine")]
     pub tts_engine: String,
@@ -110,6 +113,7 @@ impl Default for GeneralSettings {
             style_preset: "youtube_yellow".into(),
             use_cloud_stt: false,
             download_dir: None,
+            dub_enabled: false,
             tts_engine: default_tts_engine(),
             tts_voice: None,
             tts_model: None,

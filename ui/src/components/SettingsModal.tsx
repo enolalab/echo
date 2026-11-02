@@ -106,10 +106,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }, [isOpen, selectedId]);
 
   useEffect(() => {
-    if (isOpen && tab === 'general' && general.tts_engine === 'local') {
+    if (isOpen && tab === 'general' && general.dub_enabled && general.tts_engine === 'local') {
       ipc.checkPiperStatus().then(setPiper).catch(() => setPiper(null));
     }
-  }, [isOpen, tab, general.tts_engine]);
+  }, [isOpen, tab, general.dub_enabled, general.tts_engine]);
 
   if (!isOpen) return null;
 
@@ -464,6 +464,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <span className="font-semibold text-slate-300 flex items-center gap-1.5">
                 <Mic className="w-3.5 h-3.5" /> Lồng tiếng (TTS)
               </span>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={general.dub_enabled}
+                  onChange={(e) => patchGeneral({ dub_enabled: e.target.checked })}
+                />
+                <span>Bật tính năng lồng tiếng (hiện trong cửa sổ xuất)</span>
+              </label>
+              {general.dub_enabled && (
+                <>
               <label className="flex flex-col gap-1">
                 <span>Engine TTS</span>
                 <select
@@ -543,6 +553,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </button>
                   )}
                 </div>
+              )}
+                </>
               )}
             </div>
             {error && <div className="text-rose-400">{error}</div>}

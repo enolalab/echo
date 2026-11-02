@@ -197,6 +197,7 @@ let mockSettings: SettingsView = {
     bilingual: true,
     style_preset: 'youtube_yellow',
     use_cloud_stt: false,
+    dub_enabled: false,
     tts_engine: 'local',
     tts_voice: null,
     tts_model: null,

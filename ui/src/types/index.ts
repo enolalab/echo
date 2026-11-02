@@ -123,6 +123,7 @@ export interface GeneralSettings {
   style_preset: StylePreset;
   use_cloud_stt: boolean;
   download_dir?: string | null;
+  dub_enabled: boolean;
   tts_engine: TtsEngineKind;
   tts_voice?: string | null;
   tts_model?: string | null;

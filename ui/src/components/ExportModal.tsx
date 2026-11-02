@@ -13,6 +13,7 @@ import {
   Check,
   AlertCircle,
   Mic,
+  ChevronRight,
 } from 'lucide-react';
 import type {
   ExportMode,
@@ -89,8 +90,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [outputPath, setOutputPath] = useState(defaultOutputPath);
   const [stylePreset, setStylePreset] = useState<StylePreset>(initialPreset);
   const [bilingual, setBilingual] = useState(initialBilingual);
-  const [dubEnabled, setDubEnabled] = useState(false);
-  const [dubProgress, setDubProgress] = useState<string | null>(null);
+  const [dubEnabled, setDubEnabled] = useState(!!dubDefaults);
+  const [exportStage, setExportStage] = useState<'idle' | 'dubbing' | 'rendering'>('idle');
+  const [dubCount, setDubCount] = useState<{ index: number; total: number } | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportResult, setExportResult] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -102,9 +104,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       setExportResult(null);
       setErrorMsg(null);
       setCopied(false);
-      setDubProgress(null);
+      setExportStage('idle');
+      setDubCount(null);
+      setDubEnabled(!!dubDefaults);
     }
-  }, [isOpen, defaultOutputPath]);
+  }, [isOpen, defaultOutputPath, dubDefaults]);
 
   if (!isOpen) return null;
 
@@ -121,22 +125,22 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     setIsExporting(true);
     setExportResult(null);
     setErrorMsg(null);
-    setDubProgress(null);
+    setExportStage(dubEnabled ? 'dubbing' : 'rendering');
+    setDubCount(null);
 
-    const jobId = dubEnabled ? `export-${Date.now()}` : null;
-    let unlisten: (() => void) | null = null;
-    if (jobId) {
-      try {
-        unlisten = await listen<ExportProgress>('export-progress', (e) => {
-          const p = e.payload;
-          if (p.stage === 'dubbing' && p.job_id === jobId) {
-            setDubProgress(`Đang lồng tiếng ${p.index}/${p.total}`);
-          }
-        });
-      } catch {
-        // Not inside Tauri (browser/test) — progress events unavailable
+    const jobId = `export-${Date.now()}`;
+    // Fire-and-forget: don't block onExport on listener registration —
+    // outside Tauri (browser/test) this promise may never settle.
+    const unlistenPromise = listen<ExportProgress>('export-progress', (e) => {
+      const p = e.payload;
+      if (p.job_id !== jobId) return;
+      if (p.stage === 'dubbing') {
+        setExportStage('dubbing');
+        setDubCount({ index: p.index, total: p.total });
+      } else if (p.stage === 'rendering') {
+        setExportStage('rendering');
       }
-    }
+    }).catch(() => null);
 
     try {
       const result = await onExport({
@@ -154,8 +158,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     } catch (err) {
       setErrorMsg(String(err));
     } finally {
-      unlisten?.();
-      setDubProgress(null);
+      void unlistenPromise.then((u) => u?.());
+      setExportStage('idle');
+      setDubCount(null);
       setIsExporting(false);
     }
   };
@@ -194,6 +199,86 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
         {/* Content */}
         <div className="p-6 flex flex-col gap-5 overflow-y-auto max-h-[calc(85vh-130px)]">
+          {/* Stage progress card — mirrors ProgressDrawer styling */}
+          {isExporting && (
+            <div
+              data-testid="export-progress"
+              className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 flex flex-col gap-3"
+            >
+              {/* Stage breadcrumb */}
+              <div className="flex items-center gap-1.5">
+                {dubEnabled && (
+                  <>
+                    <span
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${
+                        exportStage === 'rendering'
+                          ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/50'
+                          : 'bg-blue-950/60 text-blue-300 border-blue-500/80 animate-pulse'
+                      }`}
+                    >
+                      {exportStage === 'rendering' ? (
+                        <CheckCircle2 className="w-3 h-3" />
+                      ) : (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      )}
+                      Lồng tiếng
+                    </span>
+                    <ChevronRight className="w-3 h-3 text-slate-700" />
+                  </>
+                )}
+                <span
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${
+                    exportStage === 'rendering'
+                      ? 'bg-blue-950/60 text-blue-300 border-blue-500/80 animate-pulse'
+                      : 'bg-slate-800/40 text-slate-500 border-slate-700/40'
+                  }`}
+                >
+                  {exportStage === 'rendering' ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-600" />
+                  )}
+                  {mode === 'subs_only' ? 'Xuất phụ đề' : 'Render video'}
+                </span>
+              </div>
+
+              {/* Progress bar */}
+              <div className="w-full bg-slate-800/60 h-1.5 rounded-full overflow-hidden">
+                <div
+                  data-testid="export-progress-bar"
+                  className={`h-full transition-all duration-300 ease-out ${
+                    exportStage === 'rendering'
+                      ? 'w-full bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 animate-pulse'
+                      : 'bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400'
+                  }`}
+                  style={
+                    exportStage === 'dubbing'
+                      ? { width: `${dubCount && dubCount.total > 0 ? Math.min(100, Math.round((dubCount.index / dubCount.total) * 100)) : 2}%` }
+                      : undefined
+                  }
+                />
+              </div>
+
+              {/* Status line */}
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-300">
+                  {exportStage === 'dubbing' && dubCount
+                    ? `Đang lồng tiếng ${dubCount.index}/${dubCount.total}...`
+                    : exportStage === 'dubbing'
+                      ? 'Đang khởi tạo lồng tiếng...'
+                      : mode === 'subs_only'
+                        ? 'Đang ghi file phụ đề...'
+                        : 'Đang render video...'}
+                </span>
+                {exportStage === 'dubbing' && dubCount && dubCount.total > 0 && (
+                  <span className="bg-blue-950/80 text-blue-400 font-bold px-1.5 py-0.5 rounded border border-blue-800/50">
+                    {Math.round((dubCount.index / dubCount.total) * 100)}%
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* 1. Export Mode Selection */}
           <div className="flex flex-col gap-2.5">
             <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
@@ -404,12 +489,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
         {/* Footer Actions */}
         <div className="px-6 py-4 bg-slate-950/40 border-t border-slate-800/80 flex items-center justify-end gap-3">
-          {dubProgress && (
-            <span className="mr-auto flex items-center gap-1.5 text-[11px] text-emerald-300">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              {dubProgress}
-            </span>
-          )}
           <button
             type="button"
             onClick={onClose}

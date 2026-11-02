@@ -16,6 +16,7 @@ const { loaded, saveGeneral } = vi.hoisted(() => {
       bilingual: true,
       style_preset: 'netflix_modern',
       use_cloud_stt: false,
+      dub_enabled: false,
       tts_engine: 'local' as const,
       tts_voice: null,
       tts_model: null,
