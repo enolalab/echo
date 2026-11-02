@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod media_server;
 pub mod settings_commands;
 pub mod skill_commands;
 pub mod state;
@@ -28,6 +29,10 @@ fn main() {
         _ => {}
     }
 
+    // Localhost media server for <video> playback (asset:// can't be serviced
+    // by WebKitGTK's GStreamer pipeline).
+    media_server::start();
+
     let settings = auto_subtitle::settings::SettingsStore::open_default()
         .expect("Không mở được thư mục cài đặt");
     tauri::Builder::default()
@@ -44,6 +49,7 @@ fn main() {
             get_output_dir,
             pick_directory,
             pick_save_file,
+            media_server::get_media_url,
             get_settings,
             save_profile,
             delete_profile,

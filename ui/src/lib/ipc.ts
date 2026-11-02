@@ -164,6 +164,13 @@ export async function getOutputDir(): Promise<string> {
   return await invoke<string>('get_output_dir');
 }
 
+export async function getMediaUrl(path: string): Promise<string | null> {
+  if (!isTauri()) {
+    return null;
+  }
+  return await invoke<string>('get_media_url', { path });
+}
+
 export async function pickDirectory(title?: string): Promise<string | null> {
   if (!isTauri()) {
     return null;

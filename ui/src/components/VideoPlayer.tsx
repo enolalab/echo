@@ -11,7 +11,7 @@ import {
   Youtube,
 } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { isTauri } from '../lib/ipc';
+import { isTauri, getMediaUrl } from '../lib/ipc';
 import type { SubtitleSegment, StylePreset } from '../types';
 import { SubtitleOverlay } from './SubtitleOverlay';
 import { SeekBar } from './SeekBar';
@@ -66,17 +66,42 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const activePath = showOutput && outputPath ? outputPath : videoPath;
   const outputFileName = outputPath ? outputPath.split(/[\\/]/).pop() : null;
 
-  // Convert local filesystem path to Tauri Asset URL safely
-  const videoSrc = React.useMemo(() => {
-    if (!activePath) return '';
-    if (isTauri()) {
-      try {
-        return convertFileSrc(activePath);
-      } catch {
-        return activePath;
+  // Resolve the playable URL. On Linux, WebKitGTK's GStreamer pipeline cannot
+  // service the asset:// scheme, so we stream through the localhost media
+  // server instead; other platforms use convertFileSrc as before.
+  const [videoSrc, setVideoSrc] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    const resolve = async () => {
+      if (!activePath) {
+        setVideoSrc('');
+        return;
       }
-    }
-    return activePath;
+      if (!isTauri()) {
+        setVideoSrc(activePath);
+        return;
+      }
+      if (/linux/i.test(navigator.userAgent)) {
+        try {
+          const url = await getMediaUrl(activePath);
+          if (url) {
+            if (!cancelled) setVideoSrc(url);
+            return;
+          }
+        } catch {
+          // fall through to convertFileSrc
+        }
+      }
+      try {
+        if (!cancelled) setVideoSrc(convertFileSrc(activePath));
+      } catch {
+        if (!cancelled) setVideoSrc(activePath);
+      }
+    };
+    resolve();
+    return () => {
+      cancelled = true;
+    };
   }, [activePath]);
 
   // Reset error state whenever the effective source changes
