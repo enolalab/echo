@@ -102,13 +102,16 @@ const SelectChip: React.FC<SelectChipProps> = ({
     </span>
     {trailing}
     <ChevronDown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-    <select
-      {...selectProps}
-      disabled={disabled}
-      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
-    >
-      {children}
-    </select>
+    {/* Render the invisible overlay select only when enabled — WebKitGTK
+        ignores opacity-0 on disabled selects and paints their text on top. */}
+    {!disabled && (
+      <select
+        {...selectProps}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+      >
+        {children}
+      </select>
+    )}
   </div>
 );
 
