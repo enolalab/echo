@@ -1,9 +1,11 @@
+use std::path::PathBuf;
+
 use anyhow::Context;
 use clap::Parser;
 
 use auto_subtitle::cli::{
     choose_skill, choose_translator, Cli, OutputMode, SttEngine, TranslateEngine, TranslatorChoice,
-    DEFAULT_API_MODEL, DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL,
+    TtsEngine, DEFAULT_API_MODEL, DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL,
 };
 use auto_subtitle::config::AppConfig;
 use auto_subtitle::downloader::DependencyManager;
@@ -79,6 +81,63 @@ async fn build_translator(
     }
 }
 
+async fn build_tts_engine(
+    cli: &Cli,
+    dm: &DependencyManager,
+    store: Option<&SettingsStore>,
+) -> anyhow::Result<Box<dyn auto_subtitle::tts::TtsEngine>> {
+    use auto_subtitle::tts::{api::ApiTts, piper::PiperTts};
+    match cli.tts_engine {
+        TtsEngine::Local => {
+            let piper = dm.find_or_download_piper().await?;
+            let (model, cfg) = resolve_local_voice(cli, dm).await?;
+            Ok(Box::new(PiperTts::new(piper, model, cfg)))
+        }
+        TtsEngine::Api => {
+            let stored = store.and_then(|s| s.stt_key().ok().flatten());
+            let key = cli
+                .api_key
+                .clone()
+                .or(stored)
+                .context("--api-key or OPENAI_API_KEY required for --tts-engine api")?;
+            let voice = cli.tts_voice.clone().unwrap_or_else(|| "alloy".to_string());
+            Ok(Box::new(ApiTts::new(
+                cli.api_base_url_or_default(),
+                key,
+                cli.tts_model.clone(),
+                voice,
+            )))
+        }
+    }
+}
+
+async fn resolve_local_voice(cli: &Cli, dm: &DependencyManager) -> anyhow::Result<(PathBuf, PathBuf)> {
+    match cli.tts_voice.as_deref() {
+        Some(v) => {
+            if let Some(info) = auto_subtitle::tts::find_voice(v) {
+                dm.ensure_voice(info).await
+            } else {
+                let p = PathBuf::from(v);
+                let cfg = p.with_extension("onnx.json");
+                anyhow::ensure!(p.is_file(), "voice model not found: {v}");
+                anyhow::ensure!(cfg.is_file(), "voice config missing: {}", cfg.display());
+                Ok((p, cfg))
+            }
+        }
+        None => {
+            let info = auto_subtitle::tts::default_voice_for_lang(&cli.target_lang).with_context(
+                || {
+                    format!(
+                        "không có giọng Piper nào cho ngôn ngữ '{}'; truyền --tts-voice hoặc --tts-engine api",
+                        cli.target_lang
+                    )
+                },
+            )?;
+            dm.ensure_voice(info).await
+        }
+    }
+}
+
 async fn run_app() -> anyhow::Result<()> {
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
     if raw_args.iter().any(|a| a == "--list-profiles") {
@@ -98,7 +157,7 @@ async fn run_app() -> anyhow::Result<()> {
         }
     };
 
-    let ffmpeg = if cli.mode == OutputMode::SubsOnly && cli.subtitle.is_some() {
+    let ffmpeg = if cli.mode == OutputMode::SubsOnly && cli.subtitle.is_some() && !cli.dub {
         None
     } else {
         Some(
@@ -157,10 +216,17 @@ async fn run_app() -> anyhow::Result<()> {
         Some(build_translator(&cli, store.as_ref(), skill).await?)
     };
 
+    let tts_box: Option<Box<dyn auto_subtitle::tts::TtsEngine>> = if cli.dub {
+        Some(build_tts_engine(&cli, &dep_mgr, store.as_ref()).await?)
+    } else {
+        None
+    };
+
     let deps = Deps {
         ffmpeg,
         transcriber: transcriber_box.as_deref(),
         translator: translator_box.as_deref(),
+        tts: tts_box.as_deref(),
     };
 
     let report = pipeline::run(&cli, deps).await?;

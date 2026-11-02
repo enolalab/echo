@@ -19,6 +19,12 @@ pub enum TranslateEngine {
     OpenaiCompat,
 }
 
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TtsEngine {
+    Local,
+    Api,
+}
+
 #[derive(clap::Parser, Debug, Clone)]
 #[command(
     name = "auto-subtitle",
@@ -94,6 +100,24 @@ pub struct Cli {
 
     #[arg(long)]
     pub keep_temp: bool,
+
+    /// Dub translated subtitles into a synthesized voice track
+    #[arg(long)]
+    pub dub: bool,
+
+    #[arg(long, value_enum, default_value_t = TtsEngine::Local)]
+    pub tts_engine: TtsEngine,
+
+    /// Voice: catalog id (e.g. vi_VN-vais1000-medium), api voice name, or .onnx path
+    #[arg(long)]
+    pub tts_voice: Option<String>,
+
+    #[arg(long, default_value = "tts-1")]
+    pub tts_model: String,
+
+    /// Original audio volume under the dub (0.0-1.0)
+    #[arg(long, default_value = "0.15")]
+    pub dub_orig_volume: f32,
 }
 
 use crate::settings::{ProviderProfile, Settings};

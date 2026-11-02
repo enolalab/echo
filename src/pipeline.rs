@@ -264,6 +264,7 @@ pub struct Deps<'a> {
     pub ffmpeg: Option<PathBuf>,
     pub transcriber: Option<&'a dyn Transcriber>,
     pub translator: Option<&'a dyn Translator>,
+    pub tts: Option<&'a dyn crate::tts::TtsEngine>,
 }
 
 #[derive(Debug, Clone)]
@@ -377,6 +378,35 @@ pub async fn run(cli: &Cli, deps: Deps<'_>) -> anyhow::Result<Report> {
     std::fs::write(&work_ass, ass_content)
         .with_context(|| format!("failed to write intermediate ass at {}", work_ass.display()))?;
 
+    let dub_track: Option<(PathBuf, bool)> = if cli.dub {
+        let engine = deps.tts.context("tts engine required for --dub")?;
+        let ffmpeg = deps
+            .ffmpeg
+            .as_ref()
+            .context("ffmpeg is required for --dub")?;
+        let sp = ProgressBar::new_spinner();
+        sp.set_message("Dubbing translated subtitles...");
+        sp.enable_steady_tick(std::time::Duration::from_millis(100));
+        let sp_cb = sp.clone(); // ProgressBar is a shared handle
+        let seg_total = segments.len();
+        let wav_and_audio = crate::dub::render_dub_track(
+            engine,
+            &segments,
+            ffmpeg,
+            work_dir,
+            &cli.input,
+            move |done, _t| {
+                sp_cb.set_message(format!("Đang lồng tiếng {done}/{seg_total}..."))
+            },
+            || false, // CLI has no cancellation; `FnMut` bound accepts plain fns
+        )
+        .await?;
+        sp.finish_and_clear();
+        Some(wav_and_audio)
+    } else {
+        None
+    };
+
     let mut outputs = Vec::new();
 
     if let Some(ref video_dest) = output_paths.video {
@@ -411,8 +441,19 @@ pub async fn run(cli: &Cli, deps: Deps<'_>) -> anyhow::Result<Report> {
             sp.set_message("Burning subtitles into video (hardsub)...");
             sp.enable_steady_tick(std::time::Duration::from_millis(100));
 
-            let cmd =
-                crate::media::build_hardsub_command(ffmpeg, &cli.input, &work_ass, video_dest)?;
+            let cmd = if let Some((ref dw, has_audio)) = dub_track {
+                crate::media::build_hardsub_dub_command(
+                    ffmpeg,
+                    &cli.input,
+                    &work_ass,
+                    dw,
+                    video_dest,
+                    cli.dub_orig_volume,
+                    has_audio,
+                )?
+            } else {
+                crate::media::build_hardsub_command(ffmpeg, &cli.input, &work_ass, video_dest)?
+            };
             crate::media::run_ffmpeg(cmd, "hardsub video burn")?;
             sp.finish_and_clear();
             outputs.push(video_dest.clone());
@@ -442,8 +483,19 @@ pub async fn run(cli: &Cli, deps: Deps<'_>) -> anyhow::Result<Report> {
             sp.set_message("Embedding subtitles into video container (softsub)...");
             sp.enable_steady_tick(std::time::Duration::from_millis(100));
 
-            let cmd =
-                crate::media::build_softsub_command(ffmpeg, &cli.input, &work_srt, video_dest)?;
+            let cmd = if let Some((ref dw, has_audio)) = dub_track {
+                crate::media::build_softsub_dub_command(
+                    ffmpeg,
+                    &cli.input,
+                    &work_srt,
+                    dw,
+                    video_dest,
+                    cli.dub_orig_volume,
+                    has_audio,
+                )?
+            } else {
+                crate::media::build_softsub_command(ffmpeg, &cli.input, &work_srt, video_dest)?
+            };
             crate::media::run_ffmpeg(cmd, "softsub video mux")?;
             sp.finish_and_clear();
             outputs.push(video_dest.clone());
@@ -471,6 +523,21 @@ pub async fn run(cli: &Cli, deps: Deps<'_>) -> anyhow::Result<Report> {
             sp.finish_and_clear();
             outputs.push(output_paths.srt.clone());
             outputs.push(output_paths.ass.clone());
+
+            if let Some((ref dw, _)) = dub_track {
+                let wav_dest = output_paths.srt.with_file_name(format!(
+                    "{}.dub.wav",
+                    output_paths
+                        .srt
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("out")
+                ));
+                std::fs::copy(dw, &wav_dest).with_context(|| {
+                    format!("failed to copy dub wav to {}", wav_dest.display())
+                })?;
+                outputs.push(wav_dest);
+            }
         }
     }
 

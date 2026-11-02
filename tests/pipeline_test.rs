@@ -152,6 +152,7 @@ async fn subs_only_with_existing_subtitle_never_touches_input() {
             ffmpeg: None,
             transcriber: None,
             translator: Some(&Prefix),
+            tts: None,
         },
     )
     .await
@@ -260,6 +261,7 @@ async fn hardsub_and_softsub_e2e_with_synthetic_video() {
                 ffmpeg: Some(ffmpeg.clone()),
                 transcriber: Some(&MockStt),
                 translator: Some(&Prefix),
+                tts: None,
             },
         )
         .await
