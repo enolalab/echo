@@ -155,6 +155,8 @@ export interface GeneralSettings {
   render_speed: RenderSpeed;
   /** Max concurrent LLM translation requests (1 = sequential). */
   translate_concurrency: number;
+  /** Chain straight into a hardsub export after translate finishes. */
+  auto_export: boolean;
 }
 
 export interface SettingsView {

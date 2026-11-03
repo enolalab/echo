@@ -205,6 +205,7 @@ let mockSettings: SettingsView = {
     dub_orig_volume: 0.15,
     render_speed: 'balanced',
     translate_concurrency: 4,
+    auto_export: true,
   },
   presets: [
     { id: 'builtin:math', name: 'Toán học', description: 'Mock preset', system_prompt: 'Math {target_lang}', glossary: [] },

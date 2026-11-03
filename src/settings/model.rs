@@ -103,6 +103,10 @@ pub struct GeneralSettings {
     /// Max concurrent LLM translation requests (1 = sequential)
     #[serde(default = "default_translate_concurrency")]
     pub translate_concurrency: usize,
+    /// After translate finishes, chain straight into a hardsub export
+    /// instead of making export a separate manual step.
+    #[serde(default = "default_auto_export")]
+    pub auto_export: bool,
 }
 
 fn default_tts_engine() -> String {
@@ -125,6 +129,10 @@ fn default_translate_concurrency() -> usize {
     4
 }
 
+fn default_auto_export() -> bool {
+    true
+}
+
 impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
@@ -142,6 +150,7 @@ impl Default for GeneralSettings {
             dub_orig_volume: default_dub_orig_volume(),
             render_speed: default_render_speed(),
             translate_concurrency: default_translate_concurrency(),
+            auto_export: default_auto_export(),
         }
     }
 }

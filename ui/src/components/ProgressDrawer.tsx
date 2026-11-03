@@ -9,6 +9,9 @@ interface ProgressDrawerProps {
   isRunning: boolean;
   /** A background export is running — drives the bar/badge when pipeline is idle. */
   exportRunning?: boolean;
+  /** Chain straight into export after translate — toggles general.auto_export. */
+  autoExport?: boolean;
+  onToggleAutoExport?: () => void;
   onOpenExport: () => void;
   canExport: boolean;
 }
@@ -20,7 +23,8 @@ const STAGES = [
   { key: 'ready', label: 'Sẵn Sàng' },
 ] as const;
 
-// Shown in place of the pipeline breadcrumb while an export runs
+// Export stages appended after the pipeline chain while an export runs —
+// reads as one continuous flow: Tách Audio → … → Sẵn Sàng → Render
 const EXPORT_STAGES = [
   { key: 'dubbing', label: 'Lồng Tiếng' },
   { key: 'rendering', label: 'Render Video' },
@@ -38,6 +42,8 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
   logs,
   isRunning,
   exportRunning = false,
+  autoExport = false,
+  onToggleAutoExport,
   onOpenExport,
   canExport,
 }) => {
@@ -56,7 +62,7 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
 
   const activeStageKey = progress?.stage || currentStage?.stage;
   const isExportStage = activeStageKey === 'dubbing' || activeStageKey === 'rendering';
-  const stages = isExportStage ? EXPORT_STAGES : STAGES;
+  const stages = isExportStage ? [...STAGES, ...EXPORT_STAGES] : STAGES;
   const busy = isRunning || exportRunning;
   const getStageIndex = (stageKey?: string) => {
     if (!stageKey) return -1;
@@ -64,10 +70,9 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
   };
 
   const currentIndex = getStageIndex(activeStageKey);
-  const pipelineDoneIndex = STAGES.length - 1;
   const percentage =
     progress?.percentage ??
-    (currentIndex === pipelineDoneIndex && !isExportStage ? 100 : busy ? 5 : 0);
+    (currentIndex === STAGES.length - 1 && !isExportStage ? 100 : busy ? 5 : 0);
 
   return (
     <div className="bg-slate-900 border-t border-slate-800 text-xs z-10 transition-all select-none">
@@ -150,6 +155,18 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
 
         {/* Action Buttons: Log Toggle & Export */}
         <div className="flex items-center gap-2 shrink-0">
+          <label
+            className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none pr-1"
+            title="Tự động xuất video ngay sau khi dịch xong"
+          >
+            <input
+              type="checkbox"
+              checked={autoExport}
+              onChange={onToggleAutoExport}
+              className="accent-emerald-500"
+            />
+            Tự xuất
+          </label>
           <button
             onClick={() => setShowLogs(!showLogs)}
             className="flex items-center gap-1.5 h-8 text-slate-400 hover:text-slate-200 hover:bg-slate-800 px-2.5 rounded-md border border-slate-700 transition"

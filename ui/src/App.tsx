@@ -62,6 +62,7 @@ export default function App() {
     dub_orig_volume: 0.15,
     render_speed: 'balanced',
     translate_concurrency: 4,
+    auto_export: true,
   });
   const [settingsView, setSettingsView] = useState<SettingsView | null>(null);
   const settingsRef = useRef<SettingsView | null>(null);
@@ -95,7 +96,10 @@ export default function App() {
   const exportTasksRef = useRef(exportTasks);
   exportTasksRef.current = exportTasks;
   const exportPumpRef = useRef(false);
-  const stopExportRef = useRef(false);
+  // Resolves waiting pipeline jobs once their chained export finishes.
+  const exportWaitersRef = useRef(
+    new Map<string, (r: { ok: boolean; out?: string; err?: string }) => void>()
+  );
 
   // YouTube video ids already in the queue (from "[id]" filename suffix)
   const existingYoutubeIds = useMemo(() => {
@@ -217,7 +221,9 @@ export default function App() {
     };
   }, []);
 
-  // Route ffmpeg export progress ticks to their export task
+  // Route ffmpeg export progress ticks to their export task — and to the
+  // source job when an auto-export reuses the job id, so the job row and
+  // the drawer keep showing progress through the render stage.
   useEffect(() => {
     if (!isTauri()) return;
     let unlisten: (() => void) | undefined;
@@ -226,9 +232,36 @@ export default function App() {
       if (!p.job_id) return;
       setExportTasks((prev) =>
         prev.map((t) =>
-          t.id === p.job_id ? { ...t, stage: p.stage, index: p.index, total: p.total } : t
+          t.id === p.job_id || t.request.job_id === p.job_id
+            ? { ...t, stage: p.stage, index: p.index, total: p.total }
+            : t
         )
       );
+      setJobs((prev) => {
+        if (!prev.some((j) => j.id === p.job_id)) return prev;
+        const pct = p.total > 0 ? Math.min(100, (p.index / p.total) * 100) : 5;
+        const mmss = (s: number) =>
+          `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+        return prev.map((j) =>
+          j.id === p.job_id
+            ? {
+                ...j,
+                progress: {
+                  job_id: j.id,
+                  stage: p.stage === 'dubbing' ? 'dubbing' : 'rendering',
+                  message:
+                    p.stage === 'dubbing'
+                      ? `Đang lồng tiếng ${p.index}/${p.total}...`
+                      : p.total > 0
+                        ? `Đang render ${mmss(p.index)}/${mmss(p.total)}...`
+                        : 'Đang render video...',
+                  percentage: pct,
+                  elapsed_secs: 0,
+                },
+              }
+            : j
+        );
+      });
     })
       .then((fn) => {
         unlisten = fn;
@@ -368,8 +401,95 @@ export default function App() {
         profile_id: settingsRef.current?.default_profile_id ?? null,
         skill_id,
       });
-      updateJob(job.id, { status: 'done', segments: result });
-      pushToast(`Hoàn tất ${job.videoPath.split(/[/\\]/).pop()}`, 'success');
+
+      // Chain straight into a hardsub export — the job stays 'running'
+      // through the render so the whole chain reads as one process.
+      if (!general.auto_export || result.length === 0) {
+        updateJob(job.id, { status: 'done', segments: result });
+        pushToast(`Hoàn tất ${job.videoPath.split(/[/\\]/).pop()}`, 'success');
+        return;
+      }
+
+      const name = job.videoPath.split(/[/\\]/).pop() ?? 'video';
+      const stem = name.replace(/\.[^.]+$/, '');
+      const dir = outputDir || '~/Echo Studio/outputs';
+      const outPath = `${dir}/${stem}_subtitled.mp4`;
+      const taskId = `auto-${job.id}-${Date.now()}`;
+      const request: ExportRequest = {
+        video_path: job.videoPath,
+        output_path: outPath,
+        mode: 'hardsub',
+        bilingual,
+        style_preset: stylePreset,
+        segments: result,
+        dub: general.dub_enabled
+          ? {
+              enabled: true,
+              engine: general.tts_engine,
+              voice: general.tts_voice ?? null,
+              model: general.tts_model ?? null,
+              original_volume: general.dub_orig_volume,
+            }
+          : null,
+        job_id: job.id,
+        render_speed: general.render_speed,
+        pad_subs: null,
+      };
+
+      updateJob(job.id, {
+        segments: result,
+        progress: {
+          job_id: job.id,
+          stage: 'rendering',
+          message: 'Xếp hàng xuất video...',
+          percentage: 0,
+          elapsed_secs: 0,
+        },
+      });
+      setExportTasks((prev) => [
+        ...prev,
+        {
+          id: taskId,
+          label: name,
+          outputPath: outPath,
+          request,
+          status: 'queued' as const,
+          stage: null,
+          index: 0,
+          total: 0,
+          error: null,
+        },
+      ]);
+      setLogs((prev) => [...prev, `[XUẤT] Tự động xuất: ${stem}_subtitled.mp4`]);
+
+      // Register the waiter before pumping so a fast-failing export can't
+      // resolve before we start listening.
+      const done = new Promise<{ ok: boolean; out?: string; err?: string }>((res) =>
+        exportWaitersRef.current.set(taskId, res)
+      );
+      void pumpExportQueue();
+      const res = await done;
+
+      if (res.ok) {
+        updateJob(job.id, {
+          status: 'done',
+          segments: result,
+          outputVideoPath: res.out ?? outPath,
+        });
+        pushToast(`Hoàn tất + xuất: ${stem}`, 'success');
+      } else {
+        const msg = res.err ?? 'Xuất thất bại';
+        const isCancelled = msg.includes('hủy') || msg.includes('cancel');
+        updateJob(job.id, {
+          status: isCancelled ? 'cancelled' : 'error',
+          segments: result,
+          error: msg,
+        });
+        if (!isCancelled) {
+          setLogs((prev) => [...prev, `[LỖI] ${job.videoPath}: ${msg}`]);
+          pushToast(msg, 'error');
+        }
+      }
     } catch (err) {
       const msg = String(err);
       const isCancelled = msg.includes('hủy') || msg.includes('cancel');
@@ -413,7 +533,26 @@ export default function App() {
   };
 
   const handleCancel = () => cancelQueue();
-  const handleCancelJob = (id: string) => cancelQueue(id);
+  const handleCancelJob = (id: string) => {
+    cancelQueue(id);
+    // If this job's auto-export is still queued (never reached the backend),
+    // cancel_senders has nothing for it — mark it cancelled here so the
+    // queue skips it and the waiting runJob unblocks.
+    setExportTasks((prev) =>
+      prev.map((t) =>
+        t.request.job_id === id && t.status === 'queued'
+          ? { ...t, status: 'cancelled', error: 'Đã hủy' }
+          : t
+      )
+    );
+    const queuedTask = exportTasksRef.current.find(
+      (t) => t.request.job_id === id && t.status === 'queued'
+    );
+    if (queuedTask) {
+      exportWaitersRef.current.get(queuedTask.id)?.({ ok: false, err: 'Đã hủy' });
+      exportWaitersRef.current.delete(queuedTask.id);
+    }
+  };
 
   // --- Background export queue -------------------------------------------------
   // Exports run here (not inside the modal) so the user can keep working while
@@ -429,7 +568,7 @@ export default function App() {
     if (exportPumpRef.current) return;
     exportPumpRef.current = true;
     try {
-      while (!stopExportRef.current) {
+      for (;;) {
         const task = exportTasksRef.current.find((t) => t.status === 'queued');
         if (!task) break;
         updateExportTask(task.id, { status: 'running', stage: null, index: 0, total: 0 });
@@ -441,6 +580,7 @@ export default function App() {
           if (src) updateJob(src.id, { outputVideoPath: out });
           setLogs((prev) => [...prev, `[XUẤT] ${task.label} → ${out}`]);
           pushToast(`Xuất xong: ${task.label}`, 'success');
+          exportWaitersRef.current.get(task.id)?.({ ok: true, out });
         } catch (err) {
           const msg = String(err);
           const cancelled = msg.includes('hủy') || msg.includes('cancel');
@@ -450,7 +590,9 @@ export default function App() {
           });
           setLogs((prev) => [...prev, `[LỖI XUẤT] ${task.label}: ${msg}`]);
           pushToast(`Xuất lỗi ${task.label}: ${msg}`, 'error');
-          if (cancelled) stopExportRef.current = true;
+          exportWaitersRef.current.get(task.id)?.({ ok: false, err: msg });
+        } finally {
+          exportWaitersRef.current.delete(task.id);
         }
       }
     } finally {
@@ -461,7 +603,6 @@ export default function App() {
   // Modal hands us fully-built requests; we queue them and run in background.
   const handleStartExports = useCallback(
     (requests: ExportRequest[]) => {
-      stopExportRef.current = false;
       const tasks: ExportTask[] = requests.map((r, i) => ({
         id: r.job_id ?? `export-${Date.now()}-${i}`,
         label: r.video_path.split(/[/\\]/).pop() ?? r.video_path,
@@ -487,14 +628,23 @@ export default function App() {
   );
 
   // Cancel one export task — backend kills ffmpeg via the shared cancel map.
+  // request.job_id is what the backend registered the sender under.
   const handleCancelExport = useCallback((id: string) => {
-    void cancelPipeline(id).catch((err) => console.error('Cancel export failed:', err));
+    const task = exportTasksRef.current.find((t) => t.id === id);
+    void cancelPipeline(task?.request.job_id ?? id).catch((err) =>
+      console.error('Cancel export failed:', err)
+    );
     setExportTasks((prev) =>
       prev.map((t) => (t.id === id && t.status === 'queued' ? { ...t, status: 'cancelled' } : t))
     );
+    // Unblock any runJob waiting on this task.
+    exportWaitersRef.current.get(id)?.({ ok: false, err: 'Đã hủy' });
+    exportWaitersRef.current.delete(id);
   }, []);
 
   const handleRemoveExport = useCallback((id: string) => {
+    exportWaitersRef.current.get(id)?.({ ok: false, err: 'Đã xóa khỏi hàng đợi' });
+    exportWaitersRef.current.delete(id);
     setExportTasks((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
