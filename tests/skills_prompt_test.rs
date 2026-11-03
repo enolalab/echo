@@ -3,11 +3,18 @@ use auto_subtitle::skills::prompt::*;
 use auto_subtitle::subtitle::model::SubtitleSegment as S;
 
 fn e(s: &str, t: &str) -> GlossaryEntry {
-    GlossaryEntry { source: s.into(), target: t.into() }
+    GlossaryEntry {
+        source: s.into(),
+        target: t.into(),
+    }
 }
 
 fn batch(lines: &[&str]) -> Vec<S> {
-    lines.iter().enumerate().map(|(i, l)| S::new(i + 1, 0, 1, *l)).collect()
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| S::new(i + 1, 0, 1, *l))
+        .collect()
 }
 
 fn skill(id: &str, glossary: Vec<GlossaryEntry>) -> Skill {
@@ -22,9 +29,18 @@ fn skill(id: &str, glossary: Vec<GlossaryEntry>) -> Skill {
 
 #[test]
 fn placeholders() {
-    assert_eq!(substitute("{source_lang}->{target_lang} {x}", "en", "vi"), "en->vi {x}");
-    assert_eq!(substitute("{source_lang}", "auto", "vi"), "the source language");
-    assert_eq!(substitute("{source_lang}", "AUTO", "vi"), "the source language");
+    assert_eq!(
+        substitute("{source_lang}->{target_lang} {x}", "en", "vi"),
+        "en->vi {x}"
+    );
+    assert_eq!(
+        substitute("{source_lang}", "auto", "vi"),
+        "the source language"
+    );
+    assert_eq!(
+        substitute("{source_lang}", "AUTO", "vi"),
+        "the source language"
+    );
 }
 
 #[test]
@@ -37,8 +53,15 @@ fn matching_rules() {
         e("微分", "vi phân"),
         e("absent", "y"),
     ];
-    let b = batch(&["The function uses ReLU, then Gradient Descent", "đạo hàm của f", "これは微分です"]);
-    let found: Vec<&str> = glossary_for_batch(&g, &b).iter().map(|x| x.source.as_str()).collect();
+    let b = batch(&[
+        "The function uses ReLU, then Gradient Descent",
+        "đạo hàm của f",
+        "これは微分です",
+    ]);
+    let found: Vec<&str> = glossary_for_batch(&g, &b)
+        .iter()
+        .map(|x| x.source.as_str())
+        .collect();
     assert_eq!(found, vec!["gradient descent", "đạo hàm", "relu", "微分"]);
 }
 
@@ -59,13 +82,19 @@ fn ordering_and_cap() {
     assert_eq!(found.len(), MAX_TERMS_PER_BATCH);
     assert_eq!(found[0].source, "t000");
     let g = vec![e("ab", ""), e("abc d", ""), e("aa", "")];
-    let found: Vec<&str> = glossary_for_batch(&g, &batch(&["aa ab abc d"])).iter().map(|x| x.source.as_str()).collect();
+    let found: Vec<&str> = glossary_for_batch(&g, &batch(&["aa ab abc d"]))
+        .iter()
+        .map(|x| x.source.as_str())
+        .collect();
     assert_eq!(found, vec!["abc d", "aa", "ab"]);
 }
 
 #[test]
 fn render_with_and_without_glossary() {
-    let s = skill("u1", vec![e("softmax", ""), e("logit", "logit thô"), e("absent", "z")]);
+    let s = skill(
+        "u1",
+        vec![e("softmax", ""), e("logit", "logit thô"), e("absent", "z")],
+    );
     let out = render_system_prompt(&s, &batch(&["softmax of the logit"]), "en", "fr");
     assert_eq!(
         out,

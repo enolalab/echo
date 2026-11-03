@@ -18,8 +18,14 @@ fn test_parse_single_video_json() {
     assert_eq!(res.items.len(), 1);
     assert_eq!(res.items[0].id, "dQw4w9WgXcQ");
     assert_eq!(res.items[0].duration_seconds, Some(213.0));
-    assert_eq!(res.items[0].channel_name, Some("RickAstleyVEVO".to_string()));
-    assert_eq!(res.items[0].thumbnail_url, Some("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg".to_string()));
+    assert_eq!(
+        res.items[0].channel_name,
+        Some("RickAstleyVEVO".to_string())
+    );
+    assert_eq!(
+        res.items[0].thumbnail_url,
+        Some("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg".to_string())
+    );
 }
 
 #[test]
@@ -57,5 +63,8 @@ fn test_parse_playlist_json() {
     assert_eq!(res.items[1].id, "v2");
     assert_eq!(res.items[0].duration_seconds, Some(60.0));
     assert_eq!(res.items[1].duration_seconds, Some(120.0));
-    assert_eq!(res.items[0].thumbnail_url, Some("https://example.com/1.jpg".to_string()));
+    assert_eq!(
+        res.items[0].thumbnail_url,
+        Some("https://example.com/1.jpg".to_string())
+    );
 }

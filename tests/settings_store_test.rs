@@ -2,7 +2,12 @@ use auto_subtitle::settings::secrets::{MemoryStore, SecretsBackend};
 use auto_subtitle::settings::*;
 
 fn open(dir: &std::path::Path) -> SettingsStore {
-    SettingsStore::open(dir, Box::new(MemoryStore::default()), SecretsBackend::Keyring).unwrap()
+    SettingsStore::open(
+        dir,
+        Box::new(MemoryStore::default()),
+        SecretsBackend::Keyring,
+    )
+    .unwrap()
 }
 
 fn deepseek() -> ProviderProfile {
@@ -43,7 +48,9 @@ fn corrupt_file_is_backed_up_with_warning() {
 fn upsert_assigns_id_stores_key_outside_json_and_persists() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = open(dir.path());
-    let saved = s.upsert_profile(deepseek(), Some(" sk-123 ".into())).unwrap();
+    let saved = s
+        .upsert_profile(deepseek(), Some(" sk-123 ".into()))
+        .unwrap();
     assert!(!saved.id.is_empty());
     assert_eq!(s.profile_key(&saved.id).unwrap().as_deref(), Some("sk-123"));
     assert!(s.has_profile_key(&saved.id));
@@ -57,7 +64,8 @@ fn upsert_assigns_id_stores_key_outside_json_and_persists() {
     edited.model = "deepseek-reasoner".into();
     s.upsert_profile(edited, None).unwrap();
     assert!(s.has_profile_key(&saved.id));
-    s.upsert_profile(saved.clone(), Some(String::new())).unwrap();
+    s.upsert_profile(saved.clone(), Some(String::new()))
+        .unwrap();
     assert!(!s.has_profile_key(&saved.id));
 
     let reopened = open(dir.path());
@@ -82,7 +90,10 @@ fn delete_moves_default_and_removes_key() {
     let ds = s.upsert_profile(deepseek(), Some("k".into())).unwrap();
     s.set_default_profile(&ds.id).unwrap();
     s.delete_profile(&ds.id).unwrap();
-    assert_eq!(s.settings().default_profile_id.as_deref(), Some(ollama_id.as_str()));
+    assert_eq!(
+        s.settings().default_profile_id.as_deref(),
+        Some(ollama_id.as_str())
+    );
     assert_eq!(s.profile_key(&ds.id).unwrap(), None);
     s.delete_profile(&ollama_id).unwrap();
     assert_eq!(s.settings().default_profile_id, None);
@@ -96,7 +107,10 @@ fn first_profile_becomes_default_when_none() {
     let id = s.settings().profiles[0].id.clone();
     s.delete_profile(&id).unwrap();
     let ds = s.upsert_profile(deepseek(), None).unwrap();
-    assert_eq!(s.settings().default_profile_id.as_deref(), Some(ds.id.as_str()));
+    assert_eq!(
+        s.settings().default_profile_id.as_deref(),
+        Some(ds.id.as_str())
+    );
 }
 
 #[test]
@@ -121,9 +135,18 @@ fn resolve_profile() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = open(dir.path());
     let ds = s.upsert_profile(deepseek(), None).unwrap();
-    assert_eq!(s.resolve_profile(None).unwrap().unwrap().name, "Ollama local");
-    assert_eq!(s.resolve_profile(Some("deepseek")).unwrap().unwrap().id, ds.id);
-    assert_eq!(s.resolve_profile(Some(&ds.id)).unwrap().unwrap().name, "DeepSeek");
+    assert_eq!(
+        s.resolve_profile(None).unwrap().unwrap().name,
+        "Ollama local"
+    );
+    assert_eq!(
+        s.resolve_profile(Some("deepseek")).unwrap().unwrap().id,
+        ds.id
+    );
+    assert_eq!(
+        s.resolve_profile(Some(&ds.id)).unwrap().unwrap().name,
+        "DeepSeek"
+    );
     let err = s.resolve_profile(Some("claude")).unwrap_err().to_string();
     assert!(err.contains("Không tìm thấy profile 'claude'"));
     assert!(err.contains("Ollama local") && err.contains("DeepSeek"));

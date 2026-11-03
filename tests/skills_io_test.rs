@@ -7,7 +7,10 @@ fn sample() -> Skill {
         name: "ML của tôi".into(),
         description: "d".into(),
         system_prompt: "p {target_lang}".into(),
-        glossary: vec![GlossaryEntry { source: "relu".into(), target: "".into() }],
+        glossary: vec![GlossaryEntry {
+            source: "relu".into(),
+            target: "".into(),
+        }],
     }
 }
 
@@ -23,7 +26,13 @@ fn export_shape_has_no_id() {
 #[test]
 fn roundtrip_minus_id() {
     let back = parse_import(&export_json(&sample())).unwrap();
-    assert_eq!(back, Skill { id: String::new(), ..sample() });
+    assert_eq!(
+        back,
+        Skill {
+            id: String::new(),
+            ..sample()
+        }
+    );
 }
 
 #[test]
@@ -36,12 +45,22 @@ fn import_errors() {
         parse_import(r#"{"format":"echo-skill","version":2,"skill":{}}"#).unwrap_err(),
         "Phiên bản skill không hỗ trợ: 2"
     );
-    assert!(parse_import("{oops").unwrap_err().starts_with("File skill không hợp lệ:"));
-    assert!(parse_import(r#"{"format":"echo-skill","version":1,"skill":{"name":1}}"#)
+    assert!(parse_import("{oops")
         .unwrap_err()
         .starts_with("File skill không hợp lệ:"));
-    let big = format!(r#"{{"format":"echo-skill","version":1,"pad":"{}"}}"#, "x".repeat(MAX_IMPORT_BYTES));
-    assert_eq!(parse_import(&big).unwrap_err(), "File skill quá lớn (tối đa 1 MB)");
+    assert!(
+        parse_import(r#"{"format":"echo-skill","version":1,"skill":{"name":1}}"#)
+            .unwrap_err()
+            .starts_with("File skill không hợp lệ:")
+    );
+    let big = format!(
+        r#"{{"format":"echo-skill","version":1,"pad":"{}"}}"#,
+        "x".repeat(MAX_IMPORT_BYTES)
+    );
+    assert_eq!(
+        parse_import(&big).unwrap_err(),
+        "File skill quá lớn (tối đa 1 MB)"
+    );
 }
 
 #[test]
@@ -56,6 +75,9 @@ fn import_trims_fields() {
 
 #[test]
 fn file_names_are_safe() {
-    assert_eq!(safe_file_name("AI / ML: v2?"), "AI _ ML_ v2_.echo-skill.json");
+    assert_eq!(
+        safe_file_name("AI / ML: v2?"),
+        "AI _ ML_ v2_.echo-skill.json"
+    );
     assert_eq!(safe_file_name("Toán học"), "Toán học.echo-skill.json");
 }

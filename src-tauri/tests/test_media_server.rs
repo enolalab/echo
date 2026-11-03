@@ -29,15 +29,15 @@ async fn media_server_serves_file_full_and_range() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 206);
-    assert_eq!(
-        resp.headers()["content-range"],
-        "bytes 2-5/16"
-    );
+    assert_eq!(resp.headers()["content-range"], "bytes 2-5/16");
     assert_eq!(resp.bytes().await.unwrap().as_ref(), b"2345");
 
     // Unknown token is rejected.
     let port = url.split(':').nth(2).unwrap().split('/').next().unwrap();
-    let bad = format!("http://127.0.0.1:{port}/media/badtoken/{}", url.rsplit('/').next().unwrap());
+    let bad = format!(
+        "http://127.0.0.1:{port}/media/badtoken/{}",
+        url.rsplit('/').next().unwrap()
+    );
     let resp = client.get(&bad).send().await.unwrap();
     assert_eq!(resp.status(), 403);
 

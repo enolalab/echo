@@ -75,7 +75,11 @@ impl Skill {
 }
 
 pub fn unique_name(base: &str, taken: &[String]) -> String {
-    let is_taken = |n: &str| taken.iter().any(|t| t.trim().to_lowercase() == n.to_lowercase());
+    let is_taken = |n: &str| {
+        taken
+            .iter()
+            .any(|t| t.trim().to_lowercase() == n.to_lowercase())
+    };
     if !is_taken(base) {
         return base.to_string();
     }

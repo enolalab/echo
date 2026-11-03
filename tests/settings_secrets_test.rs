@@ -68,8 +68,10 @@ fn select_falls_back_to_file_when_primary_broken() {
 #[test]
 fn select_keeps_working_primary_and_cleans_probe() {
     let dir = tempfile::tempdir().unwrap();
-    let (store, backend) =
-        select_secret_store(Box::new(MemoryStore::default()), &dir.path().join("secrets.json"));
+    let (store, backend) = select_secret_store(
+        Box::new(MemoryStore::default()),
+        &dir.path().join("secrets.json"),
+    );
     assert_eq!(backend, SecretsBackend::Keyring);
     assert_eq!(store.get("probe:echo").unwrap(), None);
     assert!(!dir.path().join("secrets.json").exists());
@@ -77,6 +79,12 @@ fn select_keeps_working_primary_and_cleans_probe() {
 
 #[test]
 fn backend_serializes_lowercase() {
-    assert_eq!(serde_json::to_string(&SecretsBackend::File).unwrap(), "\"file\"");
-    assert_eq!(serde_json::to_string(&SecretsBackend::Keyring).unwrap(), "\"keyring\"");
+    assert_eq!(
+        serde_json::to_string(&SecretsBackend::File).unwrap(),
+        "\"file\""
+    );
+    assert_eq!(
+        serde_json::to_string(&SecretsBackend::Keyring).unwrap(),
+        "\"keyring\""
+    );
 }

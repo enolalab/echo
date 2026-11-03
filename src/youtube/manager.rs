@@ -1,7 +1,7 @@
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 use anyhow::{bail, Context, Result};
 use futures_util::StreamExt;
@@ -9,9 +9,7 @@ use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
-use super::model::{
-    YoutubeInspectResult, YoutubeVideoItem, YtDlpStatus,
-};
+use super::model::{YoutubeInspectResult, YoutubeVideoItem, YtDlpStatus};
 
 #[derive(Debug, Clone)]
 pub struct YtDlpManager {
@@ -38,7 +36,11 @@ impl YtDlpManager {
             .join("auto-subtitle")
             .join("bin");
 
-        let bin_name = if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" };
+        let bin_name = if cfg!(windows) {
+            "yt-dlp.exe"
+        } else {
+            "yt-dlp"
+        };
         base_dir.join(bin_name)
     }
 
@@ -62,25 +64,23 @@ impl YtDlpManager {
         if let Ok(path) = which::which("ffmpeg") {
             return Some(path);
         }
-        let bin_name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
-        [
-            dirs::cache_dir(),
-            dirs::data_local_dir(),
-        ]
-        .into_iter()
-        .flatten()
-        .map(|d| d.join("auto-subtitle").join("bin").join(bin_name))
-        .find(|p| p.is_file())
+        let bin_name = if cfg!(windows) {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        };
+        [dirs::cache_dir(), dirs::data_local_dir()]
+            .into_iter()
+            .flatten()
+            .map(|d| d.join("auto-subtitle").join("bin").join(bin_name))
+            .find(|p| p.is_file())
     }
 
     pub async fn check_status(&self) -> YtDlpStatus {
         let bin_path = self.resolve_binary();
         match bin_path {
             Some(path) => {
-                let output = Command::new(&path)
-                    .arg("--version")
-                    .output()
-                    .await;
+                let output = Command::new(&path).arg("--version").output().await;
 
                 match output {
                     Ok(out) if out.status.success() => {
@@ -192,9 +192,7 @@ impl YtDlpManager {
     where
         F: Fn(f32, Option<String>, Option<String>) + Send + Sync + 'static,
     {
-        let bin_path = self
-            .resolve_binary()
-            .context("yt-dlp chưa được cài đặt")?;
+        let bin_path = self.resolve_binary().context("yt-dlp chưa được cài đặt")?;
 
         tokio::fs::create_dir_all(output_dir).await?;
 
@@ -249,9 +247,10 @@ impl YtDlpManager {
                                     format!("{:.1} KB/s", s / 1024.0)
                                 }
                             });
-                            let eta = parts.get(3).and_then(|e| e.parse::<u64>().ok()).map(|sec| {
-                                format!("{:02}:{:02}", sec / 60, sec % 60)
-                            });
+                            let eta = parts
+                                .get(3)
+                                .and_then(|e| e.parse::<u64>().ok())
+                                .map(|sec| format!("{:02}:{:02}", sec / 60, sec % 60));
                             on_progress(pct, speed, eta);
                         }
                     }
@@ -285,27 +284,29 @@ impl YtDlpManager {
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.contains(&id_tag)
-                    && name.ends_with(".mp4")
-                    && !name.contains(&temp_tag)
-                {
+                if name.contains(&id_tag) && name.ends_with(".mp4") && !name.contains(&temp_tag) {
                     return Ok(path);
                 }
             }
         }
 
-        bail!("Download succeeded but output file could not be located in {:?}", output_dir);
+        bail!(
+            "Download succeeded but output file could not be located in {:?}",
+            output_dir
+        );
     }
 }
 
 pub fn parse_inspect_json(json_str: &str) -> Result<YoutubeInspectResult> {
-    let val: Value = serde_json::from_str(json_str)
-        .context("Invalid JSON output from yt-dlp")?;
+    let val: Value = serde_json::from_str(json_str).context("Invalid JSON output from yt-dlp")?;
 
     let is_playlist = val.get("_type").and_then(|t| t.as_str()) == Some("playlist");
 
     if is_playlist {
-        let playlist_id = val.get("id").and_then(|i| i.as_str()).map(|s| s.to_string());
+        let playlist_id = val
+            .get("id")
+            .and_then(|i| i.as_str())
+            .map(|s| s.to_string());
         let title = val
             .get("title")
             .and_then(|t| t.as_str())
@@ -334,9 +335,15 @@ pub fn parse_inspect_json(json_str: &str) -> Result<YoutubeInspectResult> {
                         .and_then(|t| t.as_str())
                         .map(|s| s.to_string())
                         .or_else(|| {
-                            entry.get("thumbnails").and_then(|ts| ts.as_array()).and_then(|arr| {
-                                arr.first().and_then(|t| t.get("url")).and_then(|u| u.as_str()).map(|s| s.to_string())
-                            })
+                            entry
+                                .get("thumbnails")
+                                .and_then(|ts| ts.as_array())
+                                .and_then(|arr| {
+                                    arr.first()
+                                        .and_then(|t| t.get("url"))
+                                        .and_then(|u| u.as_str())
+                                        .map(|s| s.to_string())
+                                })
                         });
 
                     let webpage_url = entry
@@ -389,9 +396,14 @@ pub fn parse_inspect_json(json_str: &str) -> Result<YoutubeInspectResult> {
             .and_then(|t| t.as_str())
             .map(|s| s.to_string())
             .or_else(|| {
-                val.get("thumbnails").and_then(|ts| ts.as_array()).and_then(|arr| {
-                    arr.last().and_then(|t| t.get("url")).and_then(|u| u.as_str()).map(|s| s.to_string())
-                })
+                val.get("thumbnails")
+                    .and_then(|ts| ts.as_array())
+                    .and_then(|arr| {
+                        arr.last()
+                            .and_then(|t| t.get("url"))
+                            .and_then(|u| u.as_str())
+                            .map(|s| s.to_string())
+                    })
             });
 
         let webpage_url = val

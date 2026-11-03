@@ -3,7 +3,12 @@ use auto_subtitle::settings::{Settings, SettingsStore};
 use auto_subtitle::skills::{GlossaryEntry, Skill};
 
 fn open(dir: &std::path::Path) -> SettingsStore {
-    SettingsStore::open(dir, Box::new(MemoryStore::default()), SecretsBackend::Keyring).unwrap()
+    SettingsStore::open(
+        dir,
+        Box::new(MemoryStore::default()),
+        SecretsBackend::Keyring,
+    )
+    .unwrap()
 }
 
 fn mine(name: &str) -> Skill {
@@ -12,7 +17,10 @@ fn mine(name: &str) -> Skill {
         name: name.into(),
         description: String::new(),
         system_prompt: "p".into(),
-        glossary: vec![GlossaryEntry { source: "a".into(), target: "b".into() }],
+        glossary: vec![GlossaryEntry {
+            source: "a".into(),
+            target: "b".into(),
+        }],
     }
 }
 
@@ -48,7 +56,10 @@ fn upsert_validates_persists_and_rejects_builtin() {
 
     let mut preset = st.find_skill("builtin:math").unwrap();
     preset.system_prompt = "hack".into();
-    assert_eq!(st.upsert_skill(preset).unwrap_err().to_string(), "Không thể sửa skill có sẵn");
+    assert_eq!(
+        st.upsert_skill(preset).unwrap_err().to_string(),
+        "Không thể sửa skill có sẵn"
+    );
 
     let mut edited = s.clone();
     edited.description = "new".into();
@@ -64,10 +75,19 @@ fn delete_and_default() {
     st.set_default_skill(Some(&s.id)).unwrap();
     st.delete_skill(&s.id).unwrap();
     assert_eq!(st.settings().default_skill_id, None);
-    assert_eq!(st.delete_skill("builtin:math").unwrap_err().to_string(), "Không thể xóa skill có sẵn");
+    assert_eq!(
+        st.delete_skill("builtin:math").unwrap_err().to_string(),
+        "Không thể xóa skill có sẵn"
+    );
     st.set_default_skill(Some("builtin:math")).unwrap();
-    assert_eq!(st.settings().default_skill_id.as_deref(), Some("builtin:math"));
-    assert_eq!(st.set_default_skill(Some("nope")).unwrap_err().to_string(), "Không tìm thấy skill");
+    assert_eq!(
+        st.settings().default_skill_id.as_deref(),
+        Some("builtin:math")
+    );
+    assert_eq!(
+        st.set_default_skill(Some("nope")).unwrap_err().to_string(),
+        "Không tìm thấy skill"
+    );
     st.set_default_skill(None).unwrap();
     assert_eq!(st.settings().default_skill_id, None);
 }
@@ -94,7 +114,13 @@ fn resolve_rules() {
     st.set_default_skill(Some(&s.id)).unwrap();
     assert_eq!(st.resolve_skill(None).unwrap().unwrap().id, s.id);
     assert_eq!(st.resolve_skill(Some("none")).unwrap(), None);
-    assert_eq!(st.resolve_skill(Some("builtin:ai-ml")).unwrap().unwrap().name, "AI / Machine Learning");
+    assert_eq!(
+        st.resolve_skill(Some("builtin:ai-ml"))
+            .unwrap()
+            .unwrap()
+            .name,
+        "AI / Machine Learning"
+    );
     assert_eq!(st.resolve_skill(Some("ml")).unwrap().unwrap().id, s.id);
     assert_eq!(
         st.resolve_skill(Some("xyz")).unwrap_err().to_string(),
@@ -126,7 +152,9 @@ fn import_export() {
     let again = st.import_skill_json(&json).unwrap();
     assert_eq!(again.name, "Toán học (3)");
     assert_eq!(
-        st.import_skill_json(r#"{"format":"x","version":1}"#).unwrap_err().to_string(),
+        st.import_skill_json(r#"{"format":"x","version":1}"#)
+            .unwrap_err()
+            .to_string(),
         "File không phải skill Echo"
     );
     assert!(st.export_skill_json("nope").is_err());

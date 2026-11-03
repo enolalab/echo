@@ -17,7 +17,11 @@ pub struct TrySkillResult {
 }
 
 fn failed(system_prompt: String, error: String) -> TrySkillResult {
-    TrySkillResult { lines: vec![], system_prompt, error: Some(error) }
+    TrySkillResult {
+        lines: vec![],
+        system_prompt,
+        error: Some(error),
+    }
 }
 
 pub async fn try_skill(
@@ -32,7 +36,11 @@ pub async fn try_skill(
     if let Err(e) = skill.validate(others) {
         return failed(String::new(), e);
     }
-    let lines: Vec<&str> = sample.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = sample
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
     if lines.is_empty() {
         return failed(String::new(), "Nhập ít nhất 1 dòng".into());
     }
@@ -46,8 +54,15 @@ pub async fn try_skill(
         .collect();
     let system_prompt = render_system_prompt(&skill, &segments, source_lang, target_lang);
     let translator = LlmTranslator::new(client, Some(skill));
-    match translator.translate_batch(&segments, source_lang, target_lang).await {
-        Ok(lines) => TrySkillResult { lines, system_prompt, error: None },
+    match translator
+        .translate_batch(&segments, source_lang, target_lang)
+        .await
+    {
+        Ok(lines) => TrySkillResult {
+            lines,
+            system_prompt,
+            error: None,
+        },
         Err(e) => {
             let msg = e
                 .chain()

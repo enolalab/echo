@@ -36,7 +36,8 @@ async fn chat_without_system_omits_field() {
         .respond_with(move |req: &wiremock::Request| {
             let v: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
             assert!(v.get("system").is_none());
-            ResponseTemplate::new(200).set_body_json(json!({"content":[{"type":"text","text":"ok"}]}))
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"content":[{"type":"text","text":"ok"}]}))
         })
         .mount(&s)
         .await;
@@ -50,9 +51,10 @@ async fn list_models_and_auth_error() {
     Mock::given(method("GET"))
         .and(path("/v1/models"))
         .and(header("x-api-key", "k"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(
-            json!({"data":[{"id":"claude-b"},{"id":"claude-a"}]}),
-        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"data":[{"id":"claude-b"},{"id":"claude-a"}]})),
+        )
         .mount(&s)
         .await;
     Mock::given(path("/v1/messages"))

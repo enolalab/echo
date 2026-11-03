@@ -147,7 +147,16 @@ pub async fn download_youtube_items(
         let item_cb = item.clone();
         let on_progress = move |pct: f32, speed: Option<String>, eta: Option<String>| {
             emit_youtube_progress(
-                &app_cb, &item_cb, idx, total, "downloading", pct, speed, eta, None, None,
+                &app_cb,
+                &item_cb,
+                idx,
+                total,
+                "downloading",
+                pct,
+                speed,
+                eta,
+                None,
+                None,
             );
         };
 

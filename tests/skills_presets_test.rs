@@ -18,13 +18,31 @@ fn six_valid_presets() {
     let names: Vec<&str> = all.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(
         names,
-        vec!["Toán học", "AI / Machine Learning", "Lập trình / CS", "Vật lý", "Hóa học", "Sinh học"]
+        vec![
+            "Toán học",
+            "AI / Machine Learning",
+            "Lập trình / CS",
+            "Vật lý",
+            "Hóa học",
+            "Sinh học"
+        ]
     );
     for s in all {
         assert!(s.is_builtin());
-        assert!(s.system_prompt.contains("{source_lang}") && s.system_prompt.contains("{target_lang}"));
-        assert!(!s.system_prompt.contains("{domain}"), "{} still has {{domain}}", s.id);
-        assert!((20..=45).contains(&s.glossary.len()), "{} has {} terms", s.id, s.glossary.len());
+        assert!(
+            s.system_prompt.contains("{source_lang}") && s.system_prompt.contains("{target_lang}")
+        );
+        assert!(
+            !s.system_prompt.contains("{domain}"),
+            "{} still has {{domain}}",
+            s.id
+        );
+        assert!(
+            (20..=45).contains(&s.glossary.len()),
+            "{} has {} terms",
+            s.id,
+            s.glossary.len()
+        );
         s.validate(all).unwrap_or_else(|e| panic!("{}: {e}", s.id));
         assert_eq!(s.clone().normalized(), *s, "{} not normalized", s.id);
     }

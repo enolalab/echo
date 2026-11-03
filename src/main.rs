@@ -27,8 +27,18 @@ fn print_profiles() -> anyhow::Result<()> {
         println!("(chưa có profile nào)");
     }
     for p in &s.profiles {
-        let default = if s.default_profile_id.as_deref() == Some(p.id.as_str()) { "default" } else { "" };
-        println!("{} | {} | {} | {}", p.name, p.kind.as_str(), p.model, default);
+        let default = if s.default_profile_id.as_deref() == Some(p.id.as_str()) {
+            "default"
+        } else {
+            ""
+        };
+        println!(
+            "{} | {} | {} | {}",
+            p.name,
+            p.kind.as_str(),
+            p.model,
+            default
+        );
     }
     Ok(())
 }
@@ -37,8 +47,18 @@ fn print_skills() -> anyhow::Result<()> {
     let store = SettingsStore::open_default()?;
     let default = store.settings().default_skill_id.clone();
     for s in store.skills_all() {
-        let mark = if default.as_deref() == Some(s.id.as_str()) { "default" } else { "" };
-        println!("{} | {} | {} terms | {}", s.name, s.id, s.glossary.len(), mark);
+        let mark = if default.as_deref() == Some(s.id.as_str()) {
+            "default"
+        } else {
+            ""
+        };
+        println!(
+            "{} | {} | {} terms | {}",
+            s.name,
+            s.id,
+            s.glossary.len(),
+            mark
+        );
     }
     Ok(())
 }
@@ -50,20 +70,35 @@ async fn build_translator(
 ) -> anyhow::Result<Box<dyn Translator>> {
     match choose_translator(cli, store.map(|s| s.settings()))? {
         TranslatorChoice::Legacy(TranslateEngine::Ollama) => {
-            let url = cli.ollama_url.clone().unwrap_or_else(|| DEFAULT_OLLAMA_URL.to_string());
-            let model = cli.ollama_model.clone().unwrap_or_else(|| DEFAULT_OLLAMA_MODEL.to_string());
+            let url = cli
+                .ollama_url
+                .clone()
+                .unwrap_or_else(|| DEFAULT_OLLAMA_URL.to_string());
+            let model = cli
+                .ollama_model
+                .clone()
+                .unwrap_or_else(|| DEFAULT_OLLAMA_MODEL.to_string());
             let client = OllamaChatClient::new(url.clone(), model.clone());
             ensure_ollama_model(&client, &url, &model).await?;
-            Ok(Box::new(LlmTranslator::new(Box::new(client), skill.clone())))
+            Ok(Box::new(LlmTranslator::new(
+                Box::new(client),
+                skill.clone(),
+            )))
         }
         TranslatorChoice::Legacy(TranslateEngine::OpenaiCompat) => {
             let api_key = cli
                 .api_key
                 .clone()
                 .context("--api-key or OPENAI_API_KEY required for translation")?;
-            let model = cli.api_model.clone().unwrap_or_else(|| DEFAULT_API_MODEL.to_string());
+            let model = cli
+                .api_model
+                .clone()
+                .unwrap_or_else(|| DEFAULT_API_MODEL.to_string());
             let client = OpenAiChatClient::new(cli.api_base_url_or_default(), Some(api_key), model);
-            Ok(Box::new(LlmTranslator::new(Box::new(client), skill.clone())))
+            Ok(Box::new(LlmTranslator::new(
+                Box::new(client),
+                skill.clone(),
+            )))
         }
         TranslatorChoice::Profile(profile) => {
             let key = match store {
@@ -111,7 +146,10 @@ async fn build_tts_engine(
     }
 }
 
-async fn resolve_local_voice(cli: &Cli, dm: &DependencyManager) -> anyhow::Result<(PathBuf, PathBuf)> {
+async fn resolve_local_voice(
+    cli: &Cli,
+    dm: &DependencyManager,
+) -> anyhow::Result<(PathBuf, PathBuf)> {
     match cli.tts_voice.as_deref() {
         Some(v) => {
             if let Some(info) = auto_subtitle::tts::find_voice(v) {
@@ -186,7 +224,9 @@ async fn run_app() -> anyhow::Result<()> {
                         format!("failed to ensure whisper model '{}'", cli.whisper_model)
                     })?;
                 Some(Box::new(LocalWhisperTranscriber::new(
-                    model_path, lang_opt, !cli.no_gpu,
+                    model_path,
+                    lang_opt,
+                    !cli.no_gpu,
                 )))
             }
             SttEngine::Api => {

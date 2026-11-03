@@ -7,7 +7,10 @@ use crate::state::AppState;
 use crate::types::{ProfileView, SettingsView};
 
 pub(crate) fn lock(state: &AppState) -> Result<std::sync::MutexGuard<'_, SettingsStore>, String> {
-    state.settings.lock().map_err(|_| "Lỗi khóa cài đặt".to_string())
+    state
+        .settings
+        .lock()
+        .map_err(|_| "Lỗi khóa cài đặt".to_string())
 }
 
 pub(crate) fn build_view(store: &mut SettingsStore) -> SettingsView {
@@ -16,7 +19,10 @@ pub(crate) fn build_view(store: &mut SettingsStore) -> SettingsView {
         profiles: s
             .profiles
             .into_iter()
-            .map(|p| ProfileView { has_key: store.has_profile_key(&p.id), profile: p })
+            .map(|p| ProfileView {
+                has_key: store.has_profile_key(&p.id),
+                profile: p,
+            })
             .collect(),
         default_profile_id: s.default_profile_id,
         general: s.general,
@@ -29,7 +35,11 @@ pub(crate) fn build_view(store: &mut SettingsStore) -> SettingsView {
     }
 }
 
-pub(crate) fn resolve_key(store: &SettingsStore, id: &str, typed: Option<String>) -> Option<String> {
+pub(crate) fn resolve_key(
+    store: &SettingsStore,
+    id: &str,
+    typed: Option<String>,
+) -> Option<String> {
     typed
         .filter(|k| !k.trim().is_empty())
         .or_else(|| store.profile_key(id).ok().flatten())
@@ -95,7 +105,13 @@ pub async fn test_profile(
     let key = resolve_key(&*lock(&state)?, &profile.id, api_key);
     let client = match build_chat_client(&profile, key) {
         Ok(c) => c,
-        Err(e) => return Ok(ConnectionTest { ok: false, latency_ms: 0, error: Some(e.user_message()) }),
+        Err(e) => {
+            return Ok(ConnectionTest {
+                ok: false,
+                latency_ms: 0,
+                error: Some(e.user_message()),
+            })
+        }
     };
     Ok(test_connection(client.as_ref(), TEST_TIMEOUT).await)
 }
@@ -120,8 +136,12 @@ mod tests {
     #[test]
     fn view_exposes_has_key_but_never_the_key() {
         let dir = tempfile::tempdir().unwrap();
-        let mut store =
-            SettingsStore::open(dir.path(), Box::new(MemoryStore::default()), SecretsBackend::File).unwrap();
+        let mut store = SettingsStore::open(
+            dir.path(),
+            Box::new(MemoryStore::default()),
+            SecretsBackend::File,
+        )
+        .unwrap();
         let p = store
             .upsert_profile(
                 ProviderProfile {
@@ -148,8 +168,12 @@ mod tests {
     #[test]
     fn resolve_key_prefers_form_value_then_stored() {
         let dir = tempfile::tempdir().unwrap();
-        let mut store =
-            SettingsStore::open(dir.path(), Box::new(MemoryStore::default()), SecretsBackend::Keyring).unwrap();
+        let mut store = SettingsStore::open(
+            dir.path(),
+            Box::new(MemoryStore::default()),
+            SecretsBackend::Keyring,
+        )
+        .unwrap();
         let p = store
             .upsert_profile(
                 ProviderProfile {
@@ -162,8 +186,14 @@ mod tests {
                 Some("stored".into()),
             )
             .unwrap();
-        assert_eq!(resolve_key(&store, &p.id, Some("typed".into())).as_deref(), Some("typed"));
-        assert_eq!(resolve_key(&store, &p.id, Some("  ".into())).as_deref(), Some("stored"));
+        assert_eq!(
+            resolve_key(&store, &p.id, Some("typed".into())).as_deref(),
+            Some("typed")
+        );
+        assert_eq!(
+            resolve_key(&store, &p.id, Some("  ".into())).as_deref(),
+            Some("stored")
+        );
         assert_eq!(resolve_key(&store, &p.id, None).as_deref(), Some("stored"));
         assert_eq!(resolve_key(&store, "unknown", None), None);
     }
@@ -171,8 +201,12 @@ mod tests {
     #[test]
     fn view_includes_presets_and_user_skills() {
         let dir = tempfile::tempdir().unwrap();
-        let mut store =
-            SettingsStore::open(dir.path(), Box::new(MemoryStore::default()), SecretsBackend::Keyring).unwrap();
+        let mut store = SettingsStore::open(
+            dir.path(),
+            Box::new(MemoryStore::default()),
+            SecretsBackend::Keyring,
+        )
+        .unwrap();
         store.duplicate_skill("builtin:math").unwrap();
         store.set_default_skill(Some("builtin:math")).unwrap();
         let v = build_view(&mut store);

@@ -11,7 +11,10 @@ fn skill(id: &str, name: &str) -> Skill {
 }
 
 fn entry(s: &str, t: &str) -> GlossaryEntry {
-    GlossaryEntry { source: s.into(), target: t.into() }
+    GlossaryEntry {
+        source: s.into(),
+        target: t.into(),
+    }
 }
 
 #[test]
@@ -42,22 +45,42 @@ fn normalized_trims_everything() {
 fn validation_rules() {
     let others = vec![skill("builtin:math", "Toán học"), skill("u1", "Của tôi")];
     assert!(skill("new", "ML").validate(&others).is_ok());
-    assert_eq!(skill("new", " ").validate(&others).unwrap_err(), "Tên skill không được để trống");
-    assert_eq!(skill("new", "toán HỌC").validate(&others).unwrap_err(), "Tên skill đã tồn tại");
+    assert_eq!(
+        skill("new", " ").validate(&others).unwrap_err(),
+        "Tên skill không được để trống"
+    );
+    assert_eq!(
+        skill("new", "toán HỌC").validate(&others).unwrap_err(),
+        "Tên skill đã tồn tại"
+    );
 
     let mut s = skill("new", "ML");
     s.system_prompt = "  ".into();
-    assert_eq!(s.validate(&others).unwrap_err(), "System prompt không được để trống");
+    assert_eq!(
+        s.validate(&others).unwrap_err(),
+        "System prompt không được để trống"
+    );
     s.system_prompt = "a".repeat(MAX_PROMPT_CHARS + 1);
-    assert_eq!(s.validate(&others).unwrap_err(), "System prompt tối đa 8000 ký tự");
+    assert_eq!(
+        s.validate(&others).unwrap_err(),
+        "System prompt tối đa 8000 ký tự"
+    );
 
     let mut s = skill("new", "ML");
-    s.glossary = (0..=MAX_GLOSSARY).map(|i| entry(&format!("t{i}"), "")).collect();
-    assert_eq!(s.validate(&others).unwrap_err(), "Glossary tối đa 1000 thuật ngữ");
+    s.glossary = (0..=MAX_GLOSSARY)
+        .map(|i| entry(&format!("t{i}"), ""))
+        .collect();
+    assert_eq!(
+        s.validate(&others).unwrap_err(),
+        "Glossary tối đa 1000 thuật ngữ"
+    );
 
     let mut s = skill("new", "ML");
     s.glossary = vec![entry(" ", "x")];
-    assert_eq!(s.validate(&others).unwrap_err(), "Thuật ngữ gốc không được để trống");
+    assert_eq!(
+        s.validate(&others).unwrap_err(),
+        "Thuật ngữ gốc không được để trống"
+    );
     s.glossary = vec![entry("ReLU", "a"), entry("relu", "b")];
     assert_eq!(s.validate(&others).unwrap_err(), "Thuật ngữ bị trùng: relu");
 }

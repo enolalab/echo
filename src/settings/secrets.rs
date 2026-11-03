@@ -58,7 +58,10 @@ pub struct FileStore {
 
 impl FileStore {
     pub fn new(path: PathBuf) -> Self {
-        Self { path, lock: Mutex::new(()) }
+        Self {
+            path,
+            lock: Mutex::new(()),
+        }
     }
 
     fn read_map(&self) -> anyhow::Result<BTreeMap<String, String>> {
@@ -114,7 +117,12 @@ pub struct MemoryStore(Mutex<BTreeMap<String, String>>);
 
 impl SecretStore for MemoryStore {
     fn get(&self, account: &str) -> anyhow::Result<Option<String>> {
-        Ok(self.0.lock().unwrap_or_else(|e| e.into_inner()).get(account).cloned())
+        Ok(self
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(account)
+            .cloned())
     }
     fn set(&self, account: &str, value: &str) -> anyhow::Result<()> {
         self.0
@@ -124,7 +132,10 @@ impl SecretStore for MemoryStore {
         Ok(())
     }
     fn delete(&self, account: &str) -> anyhow::Result<()> {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).remove(account);
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(account);
         Ok(())
     }
 }
@@ -142,7 +153,10 @@ pub fn select_secret_store(
     if probe(primary.as_ref()) {
         (primary, SecretsBackend::Keyring)
     } else {
-        (Box::new(FileStore::new(fallback_path.to_path_buf())), SecretsBackend::File)
+        (
+            Box::new(FileStore::new(fallback_path.to_path_buf())),
+            SecretsBackend::File,
+        )
     }
 }
 

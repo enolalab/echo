@@ -42,7 +42,10 @@ pub fn duplicate_skill(state: State<'_, AppState>, id: String) -> Result<Setting
 }
 
 #[tauri::command]
-pub fn set_default_skill(state: State<'_, AppState>, id: Option<String>) -> Result<SettingsView, String> {
+pub fn set_default_skill(
+    state: State<'_, AppState>,
+    id: Option<String>,
+) -> Result<SettingsView, String> {
     let mut store = lock(&state)?;
     store.set_default_skill(id.as_deref()).map_err(err)?;
     Ok(build_view(&mut store))
@@ -70,7 +73,10 @@ pub async fn import_skill(state: State<'_, AppState>) -> Result<SettingsView, St
 }
 
 #[tauri::command]
-pub async fn export_skill(state: State<'_, AppState>, id: String) -> Result<Option<String>, String> {
+pub async fn export_skill(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Option<String>, String> {
     let (file_name, json) = lock(&state)?.export_skill_json(&id).map_err(err)?;
     let file = rfd::AsyncFileDialog::new()
         .set_file_name(&file_name)
@@ -92,7 +98,11 @@ pub async fn try_skill(
     source_lang: String,
     target_lang: String,
 ) -> Result<TrySkillResult, String> {
-    let fail = |msg: String| TrySkillResult { lines: vec![], system_prompt: String::new(), error: Some(msg) };
+    let fail = |msg: String| TrySkillResult {
+        lines: vec![],
+        system_prompt: String::new(),
+        error: Some(msg),
+    };
     let (client, others) = {
         let store = lock(&state)?;
         let profile = match store.resolve_profile(profile_id.as_deref()) {
@@ -119,8 +129,12 @@ mod tests {
     #[test]
     fn skill_label_for_logs() {
         let dir = tempfile::tempdir().unwrap();
-        let store =
-            SettingsStore::open(dir.path(), Box::new(MemoryStore::default()), SecretsBackend::Keyring).unwrap();
+        let store = SettingsStore::open(
+            dir.path(),
+            Box::new(MemoryStore::default()),
+            SecretsBackend::Keyring,
+        )
+        .unwrap();
         let s = store.resolve_skill(Some("builtin:math")).unwrap();
         assert_eq!(skill_log_line(s.as_ref()), "Skill: Toán học");
         assert_eq!(skill_log_line(None), "Skill: không dùng");

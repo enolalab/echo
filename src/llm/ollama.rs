@@ -11,7 +11,11 @@ pub struct OllamaChatClient {
 
 impl OllamaChatClient {
     pub fn new(base_url: String, model: String) -> Self {
-        Self { base_url: base_url.trim_end_matches('/').to_string(), model, client: http_client() }
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            model,
+            client: http_client(),
+        }
     }
 }
 
@@ -85,7 +89,9 @@ pub async fn ensure_ollama_model(
         )
     })?;
     if !ollama_model_present(&models, model) {
-        anyhow::bail!("Model '{model}' không tìm thấy trong Ollama. Hãy chạy 'ollama pull {model}' trước.");
+        anyhow::bail!(
+            "Model '{model}' không tìm thấy trong Ollama. Hãy chạy 'ollama pull {model}' trước."
+        );
     }
     Ok(())
 }

@@ -58,9 +58,8 @@ pub fn decide_tempo(dur_ms: u64, budget_ms: u64) -> f64 {
 /// "Duration: HH:MM:SS.cc" from `ffmpeg -i` stderr → ms.
 pub fn parse_ffmpeg_duration_ms(stderr: &str) -> Option<u64> {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| {
-        regex::Regex::new(r"Duration: (\d+):(\d+):(\d+)(?:\.(\d+))?").unwrap()
-    });
+    let re =
+        RE.get_or_init(|| regex::Regex::new(r"Duration: (\d+):(\d+):(\d+)(?:\.(\d+))?").unwrap());
     let c = re.captures(stderr)?;
     let h: u64 = c[1].parse().ok()?;
     let m: u64 = c[2].parse().ok()?;
@@ -162,7 +161,10 @@ where
 {
     let (video_end_ms, has_audio) = probe_media(ffmpeg, video_path);
     let plans = plan_segments(segs, video_end_ms);
-    anyhow::ensure!(!plans.is_empty(), "no synthesizable subtitle text for dubbing");
+    anyhow::ensure!(
+        !plans.is_empty(),
+        "no synthesizable subtitle text for dubbing"
+    );
     let total = plans.len();
     let mut clips = Vec::with_capacity(total);
     let mut failures = 0usize;

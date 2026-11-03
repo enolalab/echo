@@ -128,10 +128,8 @@ mod tests {
 
     #[test]
     fn dub_options_serde_roundtrip() {
-        let d: DubOptions = serde_json::from_str(
-            r#"{"enabled":true,"engine":"local","orig_volume":0.2}"#,
-        )
-        .unwrap();
+        let d: DubOptions =
+            serde_json::from_str(r#"{"enabled":true,"engine":"local","orig_volume":0.2}"#).unwrap();
         assert!(d.enabled);
         assert_eq!(d.engine, TtsEngineKind::Local);
         assert_eq!(d.orig_volume, 0.2);

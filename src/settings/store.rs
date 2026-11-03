@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context};
 
 use super::model::{GeneralSettings, ProviderProfile, Settings};
-use super::secrets::{open_secret_store, profile_account, SecretStore, SecretsBackend, STT_ACCOUNT};
+use super::secrets::{
+    open_secret_store, profile_account, SecretStore, SecretsBackend, STT_ACCOUNT,
+};
 use crate::skills::{self, io as skill_io, model::unique_name, Skill, NO_SKILL};
 
 pub fn default_config_dir() -> anyhow::Result<PathBuf> {
@@ -54,7 +56,13 @@ impl SettingsStore {
             }
             Err(e) => return Err(e).with_context(|| format!("không đọc được {}", path.display())),
         };
-        let store = Self { path, settings, secrets, backend, load_warning };
+        let store = Self {
+            path,
+            settings,
+            secrets,
+            backend,
+            load_warning,
+        };
         if needs_save {
             store.persist()?;
         }
@@ -91,7 +99,9 @@ impl SettingsStore {
         if profile.id.trim().is_empty() {
             profile.id = uuid::Uuid::new_v4().to_string();
         }
-        self.settings.validate_profile(&profile).map_err(anyhow::Error::msg)?;
+        self.settings
+            .validate_profile(&profile)
+            .map_err(anyhow::Error::msg)?;
 
         let account = profile_account(&profile.id);
         match api_key.as_deref().map(str::trim) {
@@ -100,7 +110,12 @@ impl SettingsStore {
             Some(k) => self.secrets.set(&account, k)?,
         }
 
-        match self.settings.profiles.iter_mut().find(|p| p.id == profile.id) {
+        match self
+            .settings
+            .profiles
+            .iter_mut()
+            .find(|p| p.id == profile.id)
+        {
             Some(existing) => *existing = profile.clone(),
             None => self.settings.profiles.push(profile.clone()),
         }
@@ -152,13 +167,26 @@ impl SettingsStore {
         }
     }
 
-    pub fn resolve_profile(&self, name_or_id: Option<&str>) -> anyhow::Result<Option<ProviderProfile>> {
+    pub fn resolve_profile(
+        &self,
+        name_or_id: Option<&str>,
+    ) -> anyhow::Result<Option<ProviderProfile>> {
         match name_or_id {
             None => Ok(self.settings.default_profile().cloned()),
-            Some(q) => self.settings.find_profile(q).cloned().map(Some).ok_or_else(|| {
-                let names: Vec<&str> = self.settings.profiles.iter().map(|p| p.name.as_str()).collect();
-                anyhow!("Không tìm thấy profile '{q}'. Có: {}", names.join(", "))
-            }),
+            Some(q) => self
+                .settings
+                .find_profile(q)
+                .cloned()
+                .map(Some)
+                .ok_or_else(|| {
+                    let names: Vec<&str> = self
+                        .settings
+                        .profiles
+                        .iter()
+                        .map(|p| p.name.as_str())
+                        .collect();
+                    anyhow!("Không tìm thấy profile '{q}'. Có: {}", names.join(", "))
+                }),
         }
     }
 
@@ -175,12 +203,16 @@ impl SettingsStore {
         let all = self.skills_all();
         all.iter().find(|s| s.id == q).cloned().or_else(|| {
             let lower = q.to_lowercase();
-            all.into_iter().find(|s| s.name.trim().to_lowercase() == lower)
+            all.into_iter()
+                .find(|s| s.name.trim().to_lowercase() == lower)
         })
     }
 
     pub fn other_skills(&self, id: &str) -> Vec<Skill> {
-        self.skills_all().into_iter().filter(|s| s.id != id).collect()
+        self.skills_all()
+            .into_iter()
+            .filter(|s| s.id != id)
+            .collect()
     }
 
     fn skill_names(&self) -> Vec<String> {
@@ -195,7 +227,9 @@ impl SettingsStore {
         if skill.id.is_empty() {
             skill.id = uuid::Uuid::new_v4().to_string();
         }
-        skill.validate(&self.other_skills(&skill.id)).map_err(anyhow::Error::msg)?;
+        skill
+            .validate(&self.other_skills(&skill.id))
+            .map_err(anyhow::Error::msg)?;
         match self.settings.skills.iter_mut().find(|s| s.id == skill.id) {
             Some(existing) => *existing = skill.clone(),
             None => self.settings.skills.push(skill.clone()),
@@ -222,7 +256,11 @@ impl SettingsStore {
             .find(|s| s.id == id)
             .ok_or_else(|| anyhow!("Không tìm thấy skill"))?;
         let name = unique_name(&format!("{} (bản sao)", source.name), &self.skill_names());
-        self.upsert_skill(Skill { id: String::new(), name, ..source })
+        self.upsert_skill(Skill {
+            id: String::new(),
+            name,
+            ..source
+        })
     }
 
     pub fn set_default_skill(&mut self, id: Option<&str>) -> anyhow::Result<()> {
@@ -262,6 +300,9 @@ impl SettingsStore {
             .into_iter()
             .find(|s| s.id == id)
             .ok_or_else(|| anyhow!("Không tìm thấy skill"))?;
-        Ok((skill_io::safe_file_name(&skill.name), skill_io::export_json(&skill)))
+        Ok((
+            skill_io::safe_file_name(&skill.name),
+            skill_io::export_json(&skill),
+        ))
     }
 }

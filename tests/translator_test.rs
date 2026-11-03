@@ -49,7 +49,10 @@ struct Recorder {
 #[async_trait::async_trait]
 impl ChatClient for Recorder {
     async fn chat(&self, system: Option<&str>, user: &str) -> Result<String, LlmError> {
-        self.seen.lock().unwrap().push((system.map(String::from), user.to_string()));
+        self.seen
+            .lock()
+            .unwrap()
+            .push((system.map(String::from), user.to_string()));
         self.reply.clone()
     }
     async fn list_models(&self) -> Result<Vec<String>, LlmError> {
@@ -67,15 +70,27 @@ async fn llm_translator_renders_skill_per_batch() {
         description: String::new(),
         system_prompt: "Bạn là chuyên gia Toán ({target_lang})".into(),
         glossary: vec![
-            GlossaryEntry { source: "morning".into(), target: "buổi sáng".into() },
-            GlossaryEntry { source: "absent".into(), target: "x".into() },
+            GlossaryEntry {
+                source: "morning".into(),
+                target: "buổi sáng".into(),
+            },
+            GlossaryEntry {
+                source: "absent".into(),
+                target: "x".into(),
+            },
         ],
     };
     let t = LlmTranslator::new(
-        Box::new(Recorder { seen: seen.clone(), reply: Ok("[1] A\n[2] B / C".into()) }),
+        Box::new(Recorder {
+            seen: seen.clone(),
+            reply: Ok("[1] A\n[2] B / C".into()),
+        }),
         Some(skill),
     );
-    assert_eq!(t.translate_batch(&batch(), "en", "vi").await.unwrap(), vec!["A", "B\nC"]);
+    assert_eq!(
+        t.translate_batch(&batch(), "en", "vi").await.unwrap(),
+        vec!["A", "B\nC"]
+    );
     let calls = seen.lock().unwrap();
     let system = calls[0].0.as_deref().unwrap();
     assert!(system.starts_with("Bạn là chuyên gia Toán (vi)"));
@@ -87,7 +102,13 @@ async fn llm_translator_renders_skill_per_batch() {
 #[tokio::test]
 async fn llm_translator_without_skill_sends_no_system() {
     let seen = Arc::new(Mutex::new(vec![]));
-    let t = LlmTranslator::new(Box::new(Recorder { seen: seen.clone(), reply: Ok("[1] A\n[2] B".into()) }), None);
+    let t = LlmTranslator::new(
+        Box::new(Recorder {
+            seen: seen.clone(),
+            reply: Ok("[1] A\n[2] B".into()),
+        }),
+        None,
+    );
     t.translate_batch(&batch(), "en", "vi").await.unwrap();
     assert_eq!(seen.lock().unwrap()[0].0, None);
 }
@@ -95,7 +116,10 @@ async fn llm_translator_without_skill_sends_no_system() {
 #[tokio::test]
 async fn llm_translator_wraps_llm_error_for_downcast() {
     let t = LlmTranslator::new(
-        Box::new(Recorder { seen: Arc::new(Mutex::new(vec![])), reply: Err(LlmError::Auth) }),
+        Box::new(Recorder {
+            seen: Arc::new(Mutex::new(vec![])),
+            reply: Err(LlmError::Auth),
+        }),
         None,
     );
     let err = t.translate_batch(&batch(), "en", "vi").await.unwrap_err();
@@ -105,7 +129,13 @@ async fn llm_translator_wraps_llm_error_for_downcast() {
 #[tokio::test]
 async fn llm_translator_empty_input_skips_call() {
     let seen = Arc::new(Mutex::new(vec![]));
-    let t = LlmTranslator::new(Box::new(Recorder { seen: seen.clone(), reply: Ok(String::new()) }), None);
+    let t = LlmTranslator::new(
+        Box::new(Recorder {
+            seen: seen.clone(),
+            reply: Ok(String::new()),
+        }),
+        None,
+    );
     assert!(t.translate_batch(&[], "en", "vi").await.unwrap().is_empty());
     assert!(seen.lock().unwrap().is_empty());
 }

@@ -16,9 +16,10 @@ async fn chat_sends_bearer_system_and_user() {
                 {"role": "user", "content": "hi"}
             ]
         })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(
-            json!({"choices":[{"message":{"content":"hello"}}]}),
-        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"choices":[{"message":{"content":"hello"}}]})),
+        )
         .mount(&s)
         .await;
     let c = OpenAiChatClient::new(format!("{}/v1", s.uri()), Some("k".into()), "m".into());
@@ -29,10 +30,13 @@ async fn chat_sends_bearer_system_and_user() {
 async fn chat_without_system_sends_only_user() {
     let s = MockServer::start().await;
     Mock::given(path("/chat/completions"))
-        .and(body_partial_json(json!({"messages":[{"role":"user","content":"hi"}]})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(
-            json!({"choices":[{"message":{"content":"ok"}}]}),
+        .and(body_partial_json(
+            json!({"messages":[{"role":"user","content":"hi"}]}),
         ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"choices":[{"message":{"content":"ok"}}]})),
+        )
         .mount(&s)
         .await;
     let c = OpenAiChatClient::new(s.uri(), None, "m".into());
@@ -44,13 +48,17 @@ async fn list_models_sorted() {
     let s = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/models"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(
-            json!({"data":[{"id":"gpt-4o"},{"id":"deepseek-chat"}]}),
-        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"data":[{"id":"gpt-4o"},{"id":"deepseek-chat"}]})),
+        )
         .mount(&s)
         .await;
     let c = OpenAiChatClient::new(s.uri(), Some("k".into()), "m".into());
-    assert_eq!(c.list_models().await.unwrap(), vec!["deepseek-chat", "gpt-4o"]);
+    assert_eq!(
+        c.list_models().await.unwrap(),
+        vec!["deepseek-chat", "gpt-4o"]
+    );
 }
 
 #[tokio::test]
@@ -111,24 +119,48 @@ fn retry_classification_and_messages() {
     assert!(!LlmError::Auth.is_retryable());
     assert!(!LlmError::NotFound.is_retryable());
     assert!(!LlmError::Config("x".into()).is_retryable());
-    assert!(!LlmError::Other { status: Some(400), body: String::new() }.is_retryable());
+    assert!(!LlmError::Other {
+        status: Some(400),
+        body: String::new()
+    }
+    .is_retryable());
     assert!(LlmError::RateLimit.is_retryable() && LlmError::RateLimit.should_backoff());
-    let e500 = LlmError::Other { status: Some(503), body: String::new() };
+    let e500 = LlmError::Other {
+        status: Some(503),
+        body: String::new(),
+    };
     assert!(e500.is_retryable() && e500.should_backoff());
     assert!(LlmError::Timeout("h".into()).is_retryable());
     assert!(!LlmError::Timeout("h".into()).should_backoff());
 
     assert_eq!(LlmError::Auth.user_message(), "API key không hợp lệ");
-    assert_eq!(LlmError::NotFound.user_message(), "Sai base URL hoặc tên model");
-    assert_eq!(LlmError::RateLimit.user_message(), "Bị giới hạn tốc độ, thử lại sau");
-    assert_eq!(LlmError::Timeout("h".into()).user_message(), "Không kết nối được tới h");
+    assert_eq!(
+        LlmError::NotFound.user_message(),
+        "Sai base URL hoặc tên model"
+    );
+    assert_eq!(
+        LlmError::RateLimit.user_message(),
+        "Bị giới hạn tốc độ, thử lại sau"
+    );
+    assert_eq!(
+        LlmError::Timeout("h".into()).user_message(),
+        "Không kết nối được tới h"
+    );
     assert_eq!(LlmError::Config("Thiếu".into()).user_message(), "Thiếu");
     assert_eq!(
-        LlmError::Other { status: Some(500), body: "boom".into() }.user_message(),
+        LlmError::Other {
+            status: Some(500),
+            body: "boom".into()
+        }
+        .user_message(),
         "Lỗi provider (500): boom"
     );
     assert_eq!(
-        LlmError::Other { status: None, body: "bad".into() }.user_message(),
+        LlmError::Other {
+            status: None,
+            body: "bad".into()
+        }
+        .user_message(),
         "Lỗi provider: bad"
     );
     assert_eq!(LlmError::Auth.to_string(), "API key không hợp lệ");

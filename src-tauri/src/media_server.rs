@@ -230,7 +230,9 @@ async fn handle_conn(mut stream: TcpStream, token: &str) -> Result<()> {
         }
     };
 
-    let mut file = tokio::fs::File::open(&path).await.context("open media file")?;
+    let mut file = tokio::fs::File::open(&path)
+        .await
+        .context("open media file")?;
     let len = meta.len();
 
     let (status, start, end) = match range {

@@ -12,7 +12,9 @@ pub fn substitute(template: &str, source_lang: &str, target_lang: &str) -> Strin
     } else {
         source_lang
     };
-    template.replace("{source_lang}", src).replace("{target_lang}", target_lang)
+    template
+        .replace("{source_lang}", src)
+        .replace("{target_lang}", target_lang)
 }
 
 fn term_matches(haystack: &str, term: &str) -> bool {
@@ -77,7 +79,11 @@ pub fn render_system_prompt(
             out.push_str("\n\n");
             out.push_str(GLOSSARY_HEADER);
             for t in terms {
-                let target = if t.target.trim().is_empty() { "(keep)" } else { t.target.as_str() };
+                let target = if t.target.trim().is_empty() {
+                    "(keep)"
+                } else {
+                    t.target.as_str()
+                };
                 out.push_str(&format!("\n- {} → {}", t.source, target));
             }
         }

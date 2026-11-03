@@ -15,7 +15,10 @@ impl LlmError {
             401 | 403 => Self::Auth,
             404 => Self::NotFound,
             429 => Self::RateLimit,
-            _ => Self::Other { status: Some(status), body: body.chars().take(200).collect() },
+            _ => Self::Other {
+                status: Some(status),
+                body: body.chars().take(200).collect(),
+            },
         }
     }
 
@@ -29,20 +32,26 @@ impl LlmError {
         } else if err.is_connect() || err.is_request() {
             Self::Network(host)
         } else {
-            Self::Other { status: err.status().map(|s| s.as_u16()), body: err.to_string() }
+            Self::Other {
+                status: err.status().map(|s| s.as_u16()),
+                body: err.to_string(),
+            }
         }
     }
 
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::Auth | Self::NotFound | Self::Config(_) => false,
-            Self::Other { status: Some(s), .. } => *s >= 500,
+            Self::Other {
+                status: Some(s), ..
+            } => *s >= 500,
             _ => true,
         }
     }
 
     pub fn should_backoff(&self) -> bool {
-        matches!(self, Self::RateLimit) || matches!(self, Self::Other { status: Some(s), .. } if *s >= 500)
+        matches!(self, Self::RateLimit)
+            || matches!(self, Self::Other { status: Some(s), .. } if *s >= 500)
     }
 
     pub fn user_message(&self) -> String {
@@ -52,7 +61,10 @@ impl LlmError {
             Self::RateLimit => "Bị giới hạn tốc độ, thử lại sau".into(),
             Self::Timeout(h) | Self::Network(h) => format!("Không kết nối được tới {h}"),
             Self::Config(m) => m.clone(),
-            Self::Other { status: Some(s), body } => format!("Lỗi provider ({s}): {body}"),
+            Self::Other {
+                status: Some(s),
+                body,
+            } => format!("Lỗi provider ({s}): {body}"),
             Self::Other { status: None, body } => format!("Lỗi provider: {body}"),
         }
     }

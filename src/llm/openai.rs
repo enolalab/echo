@@ -66,12 +66,16 @@ impl ChatClient for OpenAiChatClient {
         }
         messages.push(json!({"role": "user", "content": user}));
         let body = json!({"model": self.model, "temperature": 0.2, "messages": messages});
-        let resp: ChatResponse = send_json(self.auth(self.client.post(&url)).json(&body), &url).await?;
+        let resp: ChatResponse =
+            send_json(self.auth(self.client.post(&url)).json(&body), &url).await?;
         resp.choices
             .into_iter()
             .next()
             .map(|c| c.message.content.unwrap_or_default())
-            .ok_or_else(|| LlmError::Other { status: None, body: "Phản hồi không có choices".into() })
+            .ok_or_else(|| LlmError::Other {
+                status: None,
+                body: "Phản hồi không có choices".into(),
+            })
     }
 
     async fn list_models(&self) -> Result<Vec<String>, LlmError> {

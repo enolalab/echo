@@ -56,7 +56,11 @@ pub async fn test_connection(client: &dyn ChatClient, timeout: Duration) -> Conn
         Ok(Err(e)) => Some(e.user_message()),
         Err(_) => Some("Hết thời gian chờ".to_string()),
     };
-    ConnectionTest { ok: error.is_none(), latency_ms, error }
+    ConnectionTest {
+        ok: error.is_none(),
+        latency_ms,
+        error,
+    }
 }
 
 pub(crate) fn http_client() -> reqwest::Client {
@@ -70,7 +74,10 @@ pub(crate) async fn send_json<T: DeserializeOwned>(
     req: reqwest::RequestBuilder,
     url: &str,
 ) -> Result<T, LlmError> {
-    let resp = req.send().await.map_err(|e| LlmError::from_reqwest(&e, url))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| LlmError::from_reqwest(&e, url))?;
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();

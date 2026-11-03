@@ -17,9 +17,7 @@ impl ApiTts {
                 let mut h = reqwest::header::HeaderMap::new();
                 h.insert(
                     reqwest::header::AUTHORIZATION,
-                    format!("Bearer {api_key}")
-                        .parse()
-                        .expect("valid header"),
+                    format!("Bearer {api_key}").parse().expect("valid header"),
                 );
                 h
             })

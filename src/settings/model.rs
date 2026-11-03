@@ -210,7 +210,9 @@ impl Settings {
         let q = name_or_id.trim();
         self.profiles.iter().find(|p| p.id == q).or_else(|| {
             let lower = q.to_lowercase();
-            self.profiles.iter().find(|p| p.name.trim().to_lowercase() == lower)
+            self.profiles
+                .iter()
+                .find(|p| p.name.trim().to_lowercase() == lower)
         })
     }
 
