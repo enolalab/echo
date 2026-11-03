@@ -97,6 +97,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [stylePreset, setStylePreset] = useState<StylePreset>(initialPreset);
   const [bilingual, setBilingual] = useState(initialBilingual);
   const [renderSpeed, setRenderSpeed] = useState<RenderSpeed>(initialRenderSpeed ?? 'balanced');
+  const [padSubs, setPadSubs] = useState(false);
   const [dubEnabled, setDubEnabled] = useState(!!dubDefaults);
   const [exportStage, setExportStage] = useState<'idle' | 'dubbing' | 'rendering'>('idle');
   const [dubCount, setDubCount] = useState<{ index: number; total: number } | null>(null);
@@ -208,6 +209,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             dub: dubActive ? { enabled: true, ...dubDefaults } : null,
             job_id: jobId,
             render_speed: renderSpeed,
+            pad_subs: mode === 'hardsub' && padSubs ? 0 : null,
           });
           okCount++;
         } catch (err) {
@@ -465,6 +467,35 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 <option value="balanced">Cân bằng</option>
                 <option value="quality">Đẹp (chậm)</option>
               </select>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-semibold text-slate-300">
+                Sub nằm dưới video
+              </label>
+              <button
+                type="button"
+                disabled={mode !== 'hardsub' || isExporting}
+                onClick={() => setPadSubs(!padSubs)}
+                className={`h-9 px-3 rounded-lg border flex items-center justify-between transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  padSubs && mode === 'hardsub'
+                    ? 'border-blue-500/60 bg-blue-600/10 text-slate-200'
+                    : 'border-slate-700 bg-slate-900 text-slate-400 hover:border-slate-600'
+                }`}
+              >
+                <span className="text-xs">Không che hình</span>
+                <span
+                  className={`relative w-8 h-[18px] rounded-full transition-colors shrink-0 ${
+                    padSubs && mode === 'hardsub' ? 'bg-blue-600' : 'bg-slate-700'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-transform ${
+                      padSubs && mode === 'hardsub' ? 'translate-x-[14px]' : ''
+                    }`}
+                  />
+                </span>
+              </button>
             </div>
 
             <div className="flex flex-col gap-1.5">

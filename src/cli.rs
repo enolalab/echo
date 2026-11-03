@@ -113,6 +113,11 @@ pub struct Cli {
     #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u8).range(0..=51))]
     pub crf: u8,
 
+    /// Add a black bar below the video and render subtitles inside it (hardsub only,
+    /// never covers the picture). Optional bar height in px; omit for auto (20% of height)
+    #[arg(long, value_name = "PX", num_args = 0..=1, default_missing_value = "0")]
+    pub pad_subs: Option<u32>,
+
     /// Max concurrent translation requests (API: 4-8; local Ollama depends on server parallelism)
     #[arg(long, default_value_t = 4)]
     pub translate_concurrency: usize,
@@ -145,7 +150,9 @@ pub const DEFAULT_API_MODEL: &str = "gpt-4o-mini";
 
 impl Cli {
     pub fn api_base_url_or_default(&self) -> String {
-        self.api_base_url.clone().unwrap_or_else(|| DEFAULT_API_BASE_URL.to_string())
+        self.api_base_url
+            .clone()
+            .unwrap_or_else(|| DEFAULT_API_BASE_URL.to_string())
     }
 }
 
@@ -155,16 +162,25 @@ pub enum TranslatorChoice {
     Profile(ProviderProfile),
 }
 
-pub fn choose_translator(cli: &Cli, settings: Option<&Settings>) -> anyhow::Result<TranslatorChoice> {
+pub fn choose_translator(
+    cli: &Cli,
+    settings: Option<&Settings>,
+) -> anyhow::Result<TranslatorChoice> {
     if let Some(engine) = cli.translate_engine {
         return Ok(TranslatorChoice::Legacy(engine));
     }
     match (cli.profile.as_deref(), settings) {
-        (Some(q), Some(s)) => s.find_profile(q).cloned().map(TranslatorChoice::Profile).ok_or_else(|| {
-            let names: Vec<&str> = s.profiles.iter().map(|p| p.name.as_str()).collect();
-            anyhow::anyhow!("Không tìm thấy profile '{q}'. Có: {}", names.join(", "))
-        }),
-        (Some(_), None) => anyhow::bail!("Không đọc được settings.json nên không dùng được --profile"),
+        (Some(q), Some(s)) => s
+            .find_profile(q)
+            .cloned()
+            .map(TranslatorChoice::Profile)
+            .ok_or_else(|| {
+                let names: Vec<&str> = s.profiles.iter().map(|p| p.name.as_str()).collect();
+                anyhow::anyhow!("Không tìm thấy profile '{q}'. Có: {}", names.join(", "))
+            }),
+        (Some(_), None) => {
+            anyhow::bail!("Không đọc được settings.json nên không dùng được --profile")
+        }
         (None, Some(s)) => Ok(s
             .default_profile()
             .cloned()
@@ -181,7 +197,9 @@ pub fn choose_skill(cli: &Cli, store: Option<&SettingsStore>) -> anyhow::Result<
     match (cli.skill.as_deref().map(str::trim), store) {
         (Some(q), _) if q == NO_SKILL => Ok(None),
         (Some(q), Some(s)) => s.resolve_skill(Some(q)),
-        (Some(_), None) => anyhow::bail!("Không đọc được settings.json nên không dùng được --skill"),
+        (Some(_), None) => {
+            anyhow::bail!("Không đọc được settings.json nên không dùng được --skill")
+        }
         (None, Some(s)) => s.resolve_skill(None),
         (None, None) => Ok(None),
     }

@@ -4,15 +4,15 @@ use tokio::sync::broadcast;
 
 use auto_subtitle::config::AppConfig;
 use auto_subtitle::downloader::{DependencyManager, WHISPER_MODELS};
-use auto_subtitle::media::{self, run_ffmpeg};
-use auto_subtitle::stt::whisper_local::LocalWhisperTranscriber;
-use auto_subtitle::stt::Transcriber;
-use auto_subtitle::subtitle::ass::escape_ass_text;
-use auto_subtitle::subtitle::model::{sanitize_segments, SubtitleSegment};
-use auto_subtitle::subtitle::srt::render_srt;
 use auto_subtitle::llm::build_chat_client;
+use auto_subtitle::media::{self, run_ffmpeg};
 use auto_subtitle::settings::SettingsStore;
 use auto_subtitle::stt::whisper_api::ApiTranscriber;
+use auto_subtitle::stt::whisper_local::LocalWhisperTranscriber;
+use auto_subtitle::stt::Transcriber;
+use auto_subtitle::subtitle::ass::{self, escape_ass_text, AssLayout, DEFAULT_LAYOUT};
+use auto_subtitle::subtitle::model::{sanitize_segments, SubtitleSegment};
+use auto_subtitle::subtitle::srt::render_srt;
 use auto_subtitle::translate::{LlmTranslator, Translator};
 
 use crate::state::AppState;
@@ -76,34 +76,31 @@ pub async fn get_system_info() -> Result<SystemInfo, String> {
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    let (ollama_running, ollama_models) = match client
-        .get("http://localhost:11434/api/tags")
-        .send()
-        .await
-    {
-        Ok(res) if res.status().is_success() => {
-            #[derive(serde::Deserialize)]
-            struct TagModel {
-                name: String,
+    let (ollama_running, ollama_models) =
+        match client.get("http://localhost:11434/api/tags").send().await {
+            Ok(res) if res.status().is_success() => {
+                #[derive(serde::Deserialize)]
+                struct TagModel {
+                    name: String,
+                }
+                #[derive(serde::Deserialize)]
+                struct TagsResponse {
+                    models: Option<Vec<TagModel>>,
+                }
+                if let Ok(tags) = res.json::<TagsResponse>().await {
+                    let models = tags
+                        .models
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|m| m.name)
+                        .collect();
+                    (true, models)
+                } else {
+                    (true, Vec::new())
+                }
             }
-            #[derive(serde::Deserialize)]
-            struct TagsResponse {
-                models: Option<Vec<TagModel>>,
-            }
-            if let Ok(tags) = res.json::<TagsResponse>().await {
-                let models = tags
-                    .models
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|m| m.name)
-                    .collect();
-                (true, models)
-            } else {
-                (true, Vec::new())
-            }
-        }
-        _ => (false, Vec::new()),
-    };
+            _ => (false, Vec::new()),
+        };
 
     let config = get_app_config();
     let dm = DependencyManager::new(config);
@@ -149,17 +146,20 @@ pub async fn get_system_info() -> Result<SystemInfo, String> {
 }
 
 #[tauri::command]
-pub async fn download_whisper_model(
-    app: AppHandle,
-    model_name: String,
-) -> Result<(), String> {
+pub async fn download_whisper_model(app: AppHandle, model_name: String) -> Result<(), String> {
     let config = get_app_config();
     let dm = DependencyManager::new(config);
-    let _ = app.emit("pipeline-log", format!("Bắt đầu tải model Whisper '{model_name}'..."));
+    let _ = app.emit(
+        "pipeline-log",
+        format!("Bắt đầu tải model Whisper '{model_name}'..."),
+    );
     dm.ensure_whisper_model(&model_name)
         .await
         .map_err(|e| format!("Tải model thất bại: {e:#}"))?;
-    let _ = app.emit("pipeline-log", format!("Tải model '{model_name}' hoàn tất!"));
+    let _ = app.emit(
+        "pipeline-log",
+        format!("Tải model '{model_name}' hoàn tất!"),
+    );
     let _ = app.emit("download-complete", model_name);
     Ok(())
 }
@@ -201,7 +201,14 @@ pub async fn start_pipeline(
         senders.insert(job_id.clone(), cancel_tx);
     }
 
-    let result = run_pipeline(app, state.settings.clone(), config, job_id.clone(), cancel_rx).await;
+    let result = run_pipeline(
+        app,
+        state.settings.clone(),
+        config,
+        job_id.clone(),
+        cancel_rx,
+    )
+    .await;
 
     {
         let mut senders = state.cancel_senders.lock().await;
@@ -218,14 +225,22 @@ async fn run_pipeline(
     job_id: String,
     mut cancel_rx: broadcast::Receiver<()>,
 ) -> Result<Vec<SubtitleSegment>, String> {
-
     let input_video = PathBuf::from(&config.video_path);
     if !input_video.is_file() {
-        return Err(format!("Không tìm thấy file video: {}", input_video.display()));
+        return Err(format!(
+            "Không tìm thấy file video: {}",
+            input_video.display()
+        ));
     }
 
-    let (translator, stt_key, skill_line): (Option<Box<dyn Translator>>, Option<String>, Option<String>) = {
-        let store = settings.lock().map_err(|_| "Lỗi khóa cài đặt".to_string())?;
+    let (translator, stt_key, skill_line): (
+        Option<Box<dyn Translator>>,
+        Option<String>,
+        Option<String>,
+    ) = {
+        let store = settings
+            .lock()
+            .map_err(|_| "Lỗi khóa cài đặt".to_string())?;
         let (translator, skill_line) = if config.skip_translate {
             (None, None)
         } else {
@@ -233,13 +248,18 @@ async fn run_pipeline(
                 .resolve_profile(config.profile_id.as_deref())
                 .map_err(|e| format!("{e:#}"))?
                 .ok_or_else(|| "Chưa cấu hình provider dịch".to_string())?;
-            let key = store.profile_key(&profile.id).map_err(|e| format!("{e:#}"))?;
+            let key = store
+                .profile_key(&profile.id)
+                .map_err(|e| format!("{e:#}"))?;
             let client = build_chat_client(&profile, key).map_err(|e| e.user_message())?;
             let skill = store
                 .resolve_skill(config.skill_id.as_deref())
                 .map_err(|e| format!("{e:#}"))?;
             let line = crate::skill_commands::skill_log_line(skill.as_ref());
-            (Some(Box::new(LlmTranslator::new(client, skill)) as Box<dyn Translator>), Some(line))
+            (
+                Some(Box::new(LlmTranslator::new(client, skill)) as Box<dyn Translator>),
+                Some(line),
+            )
         };
         let stt_key = if config.use_cloud_stt {
             Some(
@@ -269,9 +289,9 @@ async fn run_pipeline(
 
     // Phase 1: Extract Audio
     emit_progress(
-            &app,
-            &job_id,
-            start_time,
+        &app,
+        &job_id,
+        start_time,
         "extract_audio",
         "Đang trích xuất âm thanh từ video...",
         0.0,
@@ -295,15 +315,15 @@ async fn run_pipeline(
         _ = cancel_rx.recv() => None,
     };
     match extract_res {
-        Some(Ok(Ok(()))) => {},
+        Some(Ok(Ok(()))) => {}
         Some(Ok(Err(e))) => return Err(format!("Lỗi trích xuất âm thanh: {e:#}")),
         Some(Err(e)) => return Err(format!("Lỗi luồng: {e:#}")),
         None => return Err("Tiến trình đã bị người dùng hủy.".to_string()),
     }
     emit_progress(
-            &app,
-            &job_id,
-            start_time,
+        &app,
+        &job_id,
+        start_time,
         "extract_audio",
         "Trích xuất âm thanh hoàn tất.",
         10.0,
@@ -313,11 +333,14 @@ async fn run_pipeline(
 
     // Phase 2: Transcribe (STT)
     emit_progress(
-            &app,
-            &job_id,
-            start_time,
+        &app,
+        &job_id,
+        start_time,
         "stt",
-        &format!("Đang tải và chuẩn bị model Whisper ({})...", config.whisper_model),
+        &format!(
+            "Đang tải và chuẩn bị model Whisper ({})...",
+            config.whisper_model
+        ),
         12.0,
         None,
         None,
@@ -341,14 +364,18 @@ async fn run_pipeline(
                 .ensure_whisper_model(&config.whisper_model)
                 .await
                 .map_err(|e| format!("Lỗi tải model Whisper: {e:#}"))?;
-            Box::new(LocalWhisperTranscriber::new(model_path, None, config.prefer_gpu))
+            Box::new(LocalWhisperTranscriber::new(
+                model_path,
+                None,
+                config.prefer_gpu,
+            ))
         }
     };
 
     emit_progress(
-            &app,
-            &job_id,
-            start_time,
+        &app,
+        &job_id,
+        start_time,
         "stt",
         &format!("Đang nhận dạng âm thanh với {stt_label}..."),
         18.0,
@@ -408,11 +435,14 @@ async fn run_pipeline(
     }
 
     emit_progress(
-            &app,
-            &job_id,
-            start_time,
+        &app,
+        &job_id,
+        start_time,
         "stt",
-        &format!("Nhận dạng hoàn tất: tìm thấy {} đoạn thoại.", segments.len()),
+        &format!(
+            "Nhận dạng hoàn tất: tìm thấy {} đoạn thoại.",
+            segments.len()
+        ),
         60.0,
         Some(segments.len()),
         Some(segments.len()),
@@ -425,7 +455,11 @@ async fn run_pipeline(
             &job_id,
             start_time,
             "translate",
-            &format!("Bắt đầu dịch {} đoạn phụ đề sang {}...", segments.len(), config.target_lang),
+            &format!(
+                "Bắt đầu dịch {} đoạn phụ đề sang {}...",
+                segments.len(),
+                config.target_lang
+            ),
             60.0,
             Some(0),
             Some(segments.len()),
@@ -446,7 +480,10 @@ async fn run_pipeline(
                 &job_id_translate,
                 start_time,
                 "translate",
-                &format!("Đang dịch {}/{} đoạn phụ đề sang {}...", done, total, target_lang_cb),
+                &format!(
+                    "Đang dịch {}/{} đoạn phụ đề sang {}...",
+                    done, total, target_lang_cb
+                ),
                 pct,
                 Some(done),
                 Some(total),
@@ -479,9 +516,9 @@ async fn run_pipeline(
     }
 
     emit_progress(
-            &app,
-            &job_id,
-            start_time,
+        &app,
+        &job_id,
+        start_time,
         "ready",
         &format!("Hoàn tất! Đã tạo {} đoạn phụ đề.", segments.len()),
         100.0,
@@ -492,7 +529,13 @@ async fn run_pipeline(
     Ok(segments)
 }
 
-fn render_custom_ass(segments: &[SubtitleSegment], bilingual: bool, title: &str, preset: StylePreset) -> String {
+fn render_custom_ass(
+    segments: &[SubtitleSegment],
+    bilingual: bool,
+    title: &str,
+    preset: StylePreset,
+    layout: &AssLayout,
+) -> String {
     use std::fmt::Write;
     let mut out = String::new();
     let _ = writeln!(out, "[Script Info]");
@@ -500,26 +543,63 @@ fn render_custom_ass(segments: &[SubtitleSegment], bilingual: bool, title: &str,
     let _ = writeln!(out, "ScriptType: v4.00+");
     let _ = writeln!(out, "WrapStyle: 0");
     let _ = writeln!(out, "ScaledBorderAndShadow: yes");
-    let _ = writeln!(out, "PlayResX: 1920");
-    let _ = writeln!(out, "PlayResY: 1080");
+    let _ = writeln!(out, "PlayResX: {}", layout.play_res_x);
+    let _ = writeln!(out, "PlayResY: {}", layout.play_res_y);
     let _ = writeln!(out);
 
-    let default_style = match preset {
-        StylePreset::YouTubeYellow => {
-            "Style: Default,Arial Bold,64,&H0000DEFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,3.5,0,2,10,10,40,1"
-        }
-        StylePreset::ClassicWhite => {
-            "Style: Default,Arial,64,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3,0,2,10,10,40,1"
-        }
-        StylePreset::NetflixModern => {
-            "Style: Default,Arial,58,&H00F0F0F0,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,3,1,0,2,10,10,40,1"
-        }
-        StylePreset::BilingualHighlight => {
-            "Style: Default,Arial Bold,62,&H00FFFF00,&H000000FF,&H00400000,&H00000000,1,0,0,0,100,100,0,0,1,3,0,2,10,10,40,1"
-        }
+    // (fontname, size @1080p, primary colour, outline colour, back colour, bold, border style, outline px)
+    let (font, size, primary, outline_c, back, bold, border, outline) = match preset {
+        StylePreset::YouTubeYellow => (
+            "Arial Bold",
+            64u32,
+            "&H0000DEFF",
+            "&H00000000",
+            "&H00000000",
+            1,
+            1,
+            3.5,
+        ),
+        StylePreset::ClassicWhite => (
+            "Arial",
+            64,
+            "&H00FFFFFF",
+            "&H00000000",
+            "&H00000000",
+            0,
+            1,
+            3.0,
+        ),
+        StylePreset::NetflixModern => (
+            "Arial",
+            58,
+            "&H00F0F0F0",
+            "&H00000000",
+            "&H80000000",
+            0,
+            3,
+            1.0,
+        ),
+        StylePreset::BilingualHighlight => (
+            "Arial Bold",
+            62,
+            "&H00FFFF00",
+            "&H00400000",
+            "&H00000000",
+            1,
+            1,
+            3.0,
+        ),
     };
-
-    let original_style = "Style: Original,Arial,44,&H00DCDCDC,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,120,1";
+    // Fonts are authored for a 1080-high picture; scale with the layout.
+    let main_size = (size * layout.font_main / 64).max(8);
+    let default_style = format!(
+        "Style: Default,{font},{main_size},{primary},&H000000FF,{outline_c},{back},{bold},0,0,0,100,100,0,0,{border},{outline},0,2,10,10,{},1",
+        layout.margin_v
+    );
+    let original_style = format!(
+        "Style: Original,Arial,{},&H00DCDCDC,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,{},1",
+        layout.font_orig, layout.orig_margin_v
+    );
 
     let _ = writeln!(out, "[V4+ Styles]");
     let _ = writeln!(
@@ -588,7 +668,10 @@ pub async fn check_piper_status() -> Result<PiperStatus, String> {
 }
 
 #[tauri::command]
-pub async fn ensure_piper(app: AppHandle, state: State<'_, AppState>) -> Result<PiperStatus, String> {
+pub async fn ensure_piper(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PiperStatus, String> {
     let dm = DependencyManager::new(get_app_config());
     let _ = app.emit("pipeline-log", "Đang tải Piper TTS...");
     dm.find_or_download_piper()
@@ -729,10 +812,7 @@ pub async fn export_subtitles_core(
                                 total,
                             },
                         );
-                        let _ = a.emit(
-                            "pipeline-log",
-                            format!("Đang lồng tiếng {idx}/{total}..."),
-                        );
+                        let _ = a.emit("pipeline-log", format!("Đang lồng tiếng {idx}/{total}..."));
                     }
                 },
                 move || cancel_rx.try_recv().is_ok(),
@@ -781,7 +861,13 @@ pub async fn export_subtitles_core(
     match request.mode {
         ExportMode::SubsOnly => {
             let srt_content = render_srt(&request.segments, request.bilingual);
-            let ass_content = render_custom_ass(&request.segments, request.bilingual, "Echo", request.style_preset);
+            let ass_content = render_custom_ass(
+                &request.segments,
+                request.bilingual,
+                "Echo",
+                request.style_preset,
+                &DEFAULT_LAYOUT,
+            );
             let srt_out = out_path.with_extension("srt");
             let ass_out = out_path.with_extension("ass");
             std::fs::write(&srt_out, srt_content).map_err(|e| e.to_string())?;
@@ -796,11 +882,51 @@ pub async fn export_subtitles_core(
                     wav_out.display()
                 ));
             }
-            Ok(format!("Đã xuất file phụ đề: {} và {}", srt_out.display(), ass_out.display()))
+            Ok(format!(
+                "Đã xuất file phụ đề: {} và {}",
+                srt_out.display(),
+                ass_out.display()
+            ))
         }
         ExportMode::Hardsub => {
-            let ass_content = render_custom_ass(&request.segments, request.bilingual, "Echo", request.style_preset);
-            let temp_ass = temp_dir.path().join("sub.ass");
+            // pad_subs: extend the frame with a black bar and place subtitles
+            // inside it (PlayResY = video height + bar), so they never cover
+            // the picture. Some(0) = auto 20% of height.
+            let (ass_content, temp_name, pad_px) = match request.pad_subs {
+                Some(px) => {
+                    let (w, h) =
+                        media::probe_video_size(&ffmpeg, &video_in).unwrap_or((1920, 1080));
+                    let pad = if px == 0 {
+                        ass::auto_sub_bar_height(h, request.bilingual)
+                    } else {
+                        px & !1
+                    };
+                    let layout = ass::sub_bar_layout(w, h, pad, request.bilingual);
+                    (
+                        render_custom_ass(
+                            &request.segments,
+                            request.bilingual,
+                            "Echo",
+                            request.style_preset,
+                            &layout,
+                        ),
+                        "sub_pad.ass",
+                        pad,
+                    )
+                }
+                None => (
+                    render_custom_ass(
+                        &request.segments,
+                        request.bilingual,
+                        "Echo",
+                        request.style_preset,
+                        &DEFAULT_LAYOUT,
+                    ),
+                    "sub.ass",
+                    0,
+                ),
+            };
+            let temp_ass = temp_dir.path().join(temp_name);
             std::fs::write(&temp_ass, ass_content).map_err(|e| e.to_string())?;
             let cmd = if let Some((ref dw, has_audio)) = dub_track {
                 media::build_hardsub_dub_command(
@@ -811,18 +937,22 @@ pub async fn export_subtitles_core(
                     &out_path,
                     request.dub.as_ref().map(|d| d.orig_volume).unwrap_or(0.15),
                     has_audio,
+                    pad_px,
                     enc,
                 )
                 .map_err(|e| format!("Lỗi tạo lệnh Hardsub: {e:#}"))?
             } else {
-                media::build_hardsub_command(&ffmpeg, &video_in, &temp_ass, &out_path, enc)
+                media::build_hardsub_command(&ffmpeg, &video_in, &temp_ass, &out_path, pad_px, enc)
                     .map_err(|e| format!("Lỗi tạo lệnh Hardsub: {e:#}"))?
             };
             tokio::task::spawn_blocking(move || run_ffmpeg(cmd, "hardsub"))
                 .await
                 .map_err(|e| e.to_string())?
                 .map_err(|e| format!("Lỗi xuất Hardsub: {e:#}"))?;
-            Ok(format!("Đã xuất video Hardsub thành công: {}", out_path.display()))
+            Ok(format!(
+                "Đã xuất video Hardsub thành công: {}",
+                out_path.display()
+            ))
         }
         ExportMode::Softsub => {
             let srt_content = render_srt(&request.segments, request.bilingual);
@@ -847,7 +977,10 @@ pub async fn export_subtitles_core(
                 .await
                 .map_err(|e| e.to_string())?
                 .map_err(|e| format!("Lỗi xuất Softsub: {e:#}"))?;
-            Ok(format!("Đã xuất video Softsub thành công: {}", out_path.display()))
+            Ok(format!(
+                "Đã xuất video Softsub thành công: {}",
+                out_path.display()
+            ))
         }
     }
 }
@@ -855,7 +988,11 @@ pub async fn export_subtitles_core(
 #[tauri::command]
 pub async fn open_in_file_manager(path: String) -> Result<(), String> {
     let p = Path::new(&path);
-    let dir = if p.is_dir() { p } else { p.parent().unwrap_or(p) };
+    let dir = if p.is_dir() {
+        p
+    } else {
+        p.parent().unwrap_or(p)
+    };
 
     #[cfg(target_os = "windows")]
     let _ = std::process::Command::new("explorer").arg(dir).spawn();
@@ -874,7 +1011,10 @@ pub async fn pick_video_file() -> Result<Option<String>, String> {
     let file = rfd::AsyncFileDialog::new()
         .add_filter(
             "Video & Audio",
-            &["mp4", "mkv", "avi", "mov", "flv", "wmv", "webm", "mp3", "wav", "m4a", "flac", "ogg"],
+            &[
+                "mp4", "mkv", "avi", "mov", "flv", "wmv", "webm", "mp3", "wav", "m4a", "flac",
+                "ogg",
+            ],
         )
         .set_title("Chọn tệp Video / Audio")
         .pick_file()
@@ -888,7 +1028,10 @@ pub async fn pick_video_files() -> Result<Vec<String>, String> {
     let files = rfd::AsyncFileDialog::new()
         .add_filter(
             "Video & Audio",
-            &["mp4", "mkv", "avi", "mov", "flv", "wmv", "webm", "mp3", "wav", "m4a", "flac", "ogg"],
+            &[
+                "mp4", "mkv", "avi", "mov", "flv", "wmv", "webm", "mp3", "wav", "m4a", "flac",
+                "ogg",
+            ],
         )
         .set_title("Chọn các tệp Video / Audio")
         .pick_files()
@@ -924,7 +1067,10 @@ pub async fn pick_directory(title: Option<String>) -> Result<Option<String>, Str
 }
 
 #[tauri::command]
-pub async fn pick_save_file(default_name: String, extension: String) -> Result<Option<String>, String> {
+pub async fn pick_save_file(
+    default_name: String,
+    extension: String,
+) -> Result<Option<String>, String> {
     let file = rfd::AsyncFileDialog::new()
         .set_file_name(&default_name)
         .add_filter(&extension, &[&extension])

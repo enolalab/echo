@@ -41,7 +41,12 @@ fn hardsub_uses_workdir_and_safe_filter() {
         Path::new("My Clip: 1.mp4"),
         &ass,
         Path::new("out.mp4"),
-        EncoderOpts { nvenc: false, speed: RenderSpeed::Balanced, crf: 20 },
+        0,
+        EncoderOpts {
+            nvenc: false,
+            speed: RenderSpeed::Balanced,
+            crf: 20,
+        },
     )
     .unwrap();
     assert_eq!(cmd.get_current_dir(), Some(tmp.path()));
@@ -60,9 +65,65 @@ fn hardsub_rejects_unsafe_ass_name() {
         Path::new("a.mp4"),
         Path::new("/tmp/a b:c.ass"),
         Path::new("o.mp4"),
-        EncoderOpts { nvenc: false, speed: RenderSpeed::Balanced, crf: 20 }
+        0,
+        EncoderOpts {
+            nvenc: false,
+            speed: RenderSpeed::Balanced,
+            crf: 20
+        }
     )
     .is_err());
+}
+
+#[test]
+fn hardsub_pad_extends_frame_then_burns() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ass = tmp.path().join("subtitle.ass");
+    let cmd = build_hardsub_command(
+        Path::new("ffmpeg"),
+        Path::new("in.mp4"),
+        &ass,
+        Path::new("out.mp4"),
+        240,
+        EncoderOpts {
+            nvenc: false,
+            speed: RenderSpeed::Balanced,
+            crf: 20,
+        },
+    )
+    .unwrap();
+    let a = args(&cmd);
+    let fc = a[a.iter().position(|x| x == "-filter_complex").unwrap() + 1].clone();
+    assert_eq!(fc, "[0:v]pad=iw:ih+240:0:0:black,ass=subtitle.ass[v]");
+}
+
+#[test]
+fn hardsub_pad_odd_height_rounded_down() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ass = tmp.path().join("subtitle.ass");
+    let cmd = build_hardsub_command(
+        Path::new("ffmpeg"),
+        Path::new("in.mp4"),
+        &ass,
+        Path::new("out.mp4"),
+        201,
+        EncoderOpts {
+            nvenc: false,
+            speed: RenderSpeed::Balanced,
+            crf: 20,
+        },
+    )
+    .unwrap();
+    let a = args(&cmd);
+    let fc = a[a.iter().position(|x| x == "-filter_complex").unwrap() + 1].clone();
+    assert!(fc.contains("ih+200"), "odd pad must round to even: {fc}");
+}
+
+#[test]
+fn parse_video_size_from_stderr() {
+    let stderr = "Input #0, mov,mp4, from 'in.mp4':\n  Stream #0:0(und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(progressive), 1920x1080 [SAR 1:1 DAR 16:9], 24 fps\n  Stream #0:1(und): Audio: aac (LC), 48000 Hz";
+    assert_eq!(parse_video_size(stderr), Some((1920, 1080)));
+    assert_eq!(parse_video_size("no streams"), None);
 }
 
 #[test]

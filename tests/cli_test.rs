@@ -43,6 +43,16 @@ fn invalid_values_rejected() {
     assert!(Cli::try_parse_from(["auto-subtitle"]).is_err());
 }
 
+#[test]
+fn pad_subs_flag_parses() {
+    // Off by default.
+    assert_eq!(parse(&[]).pad_subs, None);
+    // Bare flag → Some(0) = auto height.
+    assert_eq!(parse(&["--pad-subs"]).pad_subs, Some(0));
+    // Explicit px via = form.
+    assert_eq!(parse(&["--pad-subs=260"]).pad_subs, Some(260));
+}
+
 fn settings_with_deepseek() -> Settings {
     let mut s = Settings::with_defaults();
     s.profiles.push(ProviderProfile {
@@ -64,7 +74,12 @@ fn parse(args: &[&str]) -> Cli {
 #[test]
 fn explicit_engine_takes_legacy_path_even_with_profiles() {
     let s = settings_with_deepseek();
-    let c = parse(&["--translate-engine", "openai-compat", "--profile", "DeepSeek"]);
+    let c = parse(&[
+        "--translate-engine",
+        "openai-compat",
+        "--profile",
+        "DeepSeek",
+    ]);
     assert!(matches!(
         choose_translator(&c, Some(&s)).unwrap(),
         TranslatorChoice::Legacy(TranslateEngine::OpenaiCompat)
@@ -96,7 +111,11 @@ fn unknown_profile_and_missing_settings() {
         choose_translator(&parse(&[]), None).unwrap(),
         TranslatorChoice::Legacy(TranslateEngine::Ollama)
     ));
-    let empty = Settings { profiles: vec![], default_profile_id: None, ..Settings::with_defaults() };
+    let empty = Settings {
+        profiles: vec![],
+        default_profile_id: None,
+        ..Settings::with_defaults()
+    };
     assert!(matches!(
         choose_translator(&parse(&[]), Some(&empty)).unwrap(),
         TranslatorChoice::Legacy(TranslateEngine::Ollama)
@@ -112,7 +131,12 @@ use auto_subtitle::settings::secrets::{MemoryStore, SecretsBackend};
 use auto_subtitle::settings::SettingsStore;
 
 fn store_in(dir: &std::path::Path) -> SettingsStore {
-    SettingsStore::open(dir, Box::new(MemoryStore::default()), SecretsBackend::Keyring).unwrap()
+    SettingsStore::open(
+        dir,
+        Box::new(MemoryStore::default()),
+        SecretsBackend::Keyring,
+    )
+    .unwrap()
 }
 
 #[test]
@@ -121,14 +145,26 @@ fn skill_flag_resolution() {
     let mut st = store_in(dir.path());
     assert_eq!(choose_skill(&parse(&[]), Some(&st)).unwrap(), None);
     st.set_default_skill(Some("builtin:math")).unwrap();
-    assert_eq!(choose_skill(&parse(&[]), Some(&st)).unwrap().unwrap().id, "builtin:math");
-    assert_eq!(choose_skill(&parse(&["--skill", "none"]), Some(&st)).unwrap(), None);
     assert_eq!(
-        choose_skill(&parse(&["--skill", "ai / machine learning"]), Some(&st)).unwrap().unwrap().id,
+        choose_skill(&parse(&[]), Some(&st)).unwrap().unwrap().id,
+        "builtin:math"
+    );
+    assert_eq!(
+        choose_skill(&parse(&["--skill", "none"]), Some(&st)).unwrap(),
+        None
+    );
+    assert_eq!(
+        choose_skill(&parse(&["--skill", "ai / machine learning"]), Some(&st))
+            .unwrap()
+            .unwrap()
+            .id,
         "builtin:ai-ml"
     );
     assert_eq!(
-        choose_skill(&parse(&["--skill", "builtin:biology"]), Some(&st)).unwrap().unwrap().name,
+        choose_skill(&parse(&["--skill", "builtin:biology"]), Some(&st))
+            .unwrap()
+            .unwrap()
+            .name,
         "Sinh học"
     );
     assert!(choose_skill(&parse(&["--skill", "xyz"]), Some(&st)).is_err());
@@ -137,9 +173,15 @@ fn skill_flag_resolution() {
 #[test]
 fn skill_flag_without_settings() {
     assert_eq!(choose_skill(&parse(&[]), None).unwrap(), None);
-    assert_eq!(choose_skill(&parse(&["--skill", "none"]), None).unwrap(), None);
+    assert_eq!(
+        choose_skill(&parse(&["--skill", "none"]), None).unwrap(),
+        None
+    );
     let err = choose_skill(&parse(&["--skill", "Toán học"]), None).unwrap_err();
-    assert_eq!(err.to_string(), "Không đọc được settings.json nên không dùng được --skill");
+    assert_eq!(
+        err.to_string(),
+        "Không đọc được settings.json nên không dùng được --skill"
+    );
 }
 
 #[test]
@@ -147,8 +189,14 @@ fn skill_applies_with_legacy_engine() {
     let dir = tempfile::tempdir().unwrap();
     let st = store_in(dir.path());
     let c = parse(&["--translate-engine", "ollama", "--skill", "builtin:math"]);
-    assert!(matches!(choose_translator(&c, Some(st.settings())).unwrap(), TranslatorChoice::Legacy(_)));
-    assert_eq!(choose_skill(&c, Some(&st)).unwrap().unwrap().id, "builtin:math");
+    assert!(matches!(
+        choose_translator(&c, Some(st.settings())).unwrap(),
+        TranslatorChoice::Legacy(_)
+    ));
+    assert_eq!(
+        choose_skill(&c, Some(&st)).unwrap().unwrap().id,
+        "builtin:math"
+    );
 }
 
 #[test]

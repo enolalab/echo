@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
 use auto_subtitle::settings::{GeneralSettings, ProviderProfile, SecretsBackend};
 use auto_subtitle::skills::Skill;
 use auto_subtitle::subtitle::SubtitleSegment;
 use auto_subtitle::tts::DubOptions;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WhisperModelInfo {
@@ -77,6 +77,10 @@ pub struct ExportRequest {
     /// CRF 0-51 — hardsub re-encode only.
     #[serde(default = "default_crf")]
     pub crf: u8,
+    /// Black subtitle-bar height in px added below the video (hardsub only):
+    /// Some(0) = auto (20% of height), Some(px) = fixed, None = off.
+    #[serde(default)]
+    pub pad_subs: Option<u32>,
 }
 
 fn default_render_speed() -> String {

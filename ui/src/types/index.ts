@@ -56,6 +56,8 @@ export interface ExportRequest {
   dub?: DubOptions | null;
   job_id?: string | null;
   render_speed?: RenderSpeed;
+  /** Black subtitle-bar height below the video (hardsub): 0 = auto, number = px, null = off. */
+  pad_subs?: number | null;
 }
 
 export interface PiperStatus {

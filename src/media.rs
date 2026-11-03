@@ -131,6 +131,27 @@ fn output_ext(path: &Path) -> String {
         .unwrap_or_default()
 }
 
+/// Parse WxH of the first `Video:` stream line in `ffmpeg -i` stderr.
+pub fn parse_video_size(stderr: &str) -> Option<(u32, u32)> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r"Stream[^\n]*Video:[^\n]*?(\d{2,5})x(\d{2,5})").unwrap()
+    });
+    let c = re.captures(stderr)?;
+    Some((c[1].parse().ok()?, c[2].parse().ok()?))
+}
+
+/// `ffmpeg -i <video>` probe → (width, height) of the first video stream.
+pub fn probe_video_size(ffmpeg: &Path, video: &Path) -> Option<(u32, u32)> {
+    let out = std::process::Command::new(ffmpeg)
+        .arg("-hide_banner")
+        .arg("-i")
+        .arg(video)
+        .output()
+        .ok()?;
+    parse_video_size(&String::from_utf8_lossy(&out.stderr))
+}
+
 /// Codec for a newly injected srt track by container: mp4-family needs mov_text.
 fn new_sub_codec(output: &Path) -> anyhow::Result<&'static str> {
     let ext = output_ext(output);
@@ -171,11 +192,14 @@ fn push_passthrough_streams(cmd: &mut Command, output: &Path) {
         .arg(passthrough_sub_codec(output));
 }
 
+/// pad > 0 → extend the frame downward by `pad` black px and render the
+/// (matching PlayRes) ASS into that band, so subtitles never cover the picture.
 pub fn build_hardsub_command(
     ffmpeg: &Path,
     video: &Path,
     ass_path: &Path,
     output: &Path,
+    pad: u32,
     enc: EncoderOpts,
 ) -> anyhow::Result<Command> {
     let file_name = ass_path
@@ -198,16 +222,27 @@ pub fn build_hardsub_command(
     let abs_output = std::path::absolute(output)
         .with_context(|| format!("failed to make output path absolute: {}", output.display()))?;
 
+    // Even heights only: yuv420 (libx264/nvenc) can't encode odd heights.
+    let pad = pad & !1;
+    let vgraph = if pad > 0 {
+        format!("[0:v]pad=iw:ih+{pad}:0:0:black,ass={file_name}[v]")
+    } else {
+        format!("[0:v]ass={file_name}[v]")
+    };
+
     let mut cmd = Command::new(ffmpeg);
     if let Some(parent) = ass_path.parent() {
         cmd.current_dir(parent);
     }
-    cmd.arg("-hide_banner").arg("-loglevel").arg("error").arg("-y");
+    cmd.arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-y");
     push_hwaccel(&mut cmd, enc);
     cmd.arg("-i")
         .arg(&abs_video)
         .arg("-filter_complex")
-        .arg(format!("[0:v]ass={file_name}[v]"))
+        .arg(vgraph)
         .arg("-map")
         .arg("[v]")
         .arg("-map")
@@ -231,6 +266,7 @@ pub fn build_hardsub_dub_command(
     output: &Path,
     orig_volume: f32,
     has_audio: bool,
+    pad: u32,
     enc: EncoderOpts,
 ) -> anyhow::Result<Command> {
     let file_name = ass_path
@@ -253,19 +289,28 @@ pub fn build_hardsub_dub_command(
     let abs_output = std::path::absolute(output)
         .with_context(|| format!("failed to make output path absolute: {}", output.display()))?;
 
-    let graph = if has_audio {
-        format!(
-            "[0:v]ass={file_name}[v];[0:a]volume={orig_volume}[a0];[1:a]apad[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0[aout]"
-        )
+    let pad = pad & !1;
+    let vgraph = if pad > 0 {
+        format!("[0:v]pad=iw:ih+{pad}:0:0:black,ass={file_name}[v]")
     } else {
         format!("[0:v]ass={file_name}[v]")
+    };
+    let graph = if has_audio {
+        format!(
+            "{vgraph};[0:a]volume={orig_volume}[a0];[1:a]apad[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0[aout]"
+        )
+    } else {
+        vgraph
     };
 
     let mut cmd = Command::new(ffmpeg);
     if let Some(parent) = ass_path.parent() {
         cmd.current_dir(parent);
     }
-    cmd.arg("-hide_banner").arg("-loglevel").arg("error").arg("-y");
+    cmd.arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-y");
     // hwaccel applies only to the video input (first -i).
     push_hwaccel(&mut cmd, enc);
     cmd.arg("-i")
@@ -453,13 +498,15 @@ mod tests {
             Path::new("/o.mp4"),
             0.15,
             true,
-            EncoderOpts { nvenc: false, speed: RenderSpeed::Balanced, crf: 20 },
+            0,
+            EncoderOpts {
+                nvenc: false,
+                speed: RenderSpeed::Balanced,
+                crf: 20,
+            },
         )
         .unwrap();
-        let args: Vec<String> = cmd
-            .get_args()
-            .map(|a| a.to_string_lossy().into())
-            .collect();
+        let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into()).collect();
         let fc = args[args.iter().position(|a| a == "-filter_complex").unwrap() + 1].clone();
         assert!(fc.contains("ass=subtitle.ass"));
         assert!(fc.contains("volume=0.15"));
@@ -479,10 +526,7 @@ mod tests {
             true,
         )
         .unwrap();
-        let args: Vec<String> = cmd
-            .get_args()
-            .map(|a| a.to_string_lossy().into())
-            .collect();
+        let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into()).collect();
         let cs = args.iter().position(|a| a == "-c:s:0").unwrap();
         assert_eq!(args[cs + 1], "srt"); // .mkv → srt codec for injected track
         let fc = args[args.iter().position(|a| a == "-filter_complex").unwrap() + 1].clone();
@@ -501,10 +545,7 @@ mod tests {
             false,
         )
         .unwrap();
-        let args: Vec<String> = cmd
-            .get_args()
-            .map(|a| a.to_string_lossy().into())
-            .collect();
+        let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into()).collect();
         assert!(!args.contains(&"-filter_complex".to_string()));
         assert!(args.contains(&"2:a".to_string()));
     }

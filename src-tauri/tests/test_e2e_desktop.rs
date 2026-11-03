@@ -24,6 +24,7 @@ async fn test_export_subs_only_e2e() {
         job_id: None,
         render_speed: "balanced".to_string(),
         crf: 20,
+        pad_subs: None,
     };
 
     let res = export_subtitles_core(None, None, req).await;

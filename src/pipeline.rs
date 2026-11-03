@@ -446,9 +446,7 @@ pub async fn run(cli: &Cli, deps: Deps<'_>) -> anyhow::Result<Report> {
             ffmpeg,
             work_dir,
             &cli.input,
-            move |done, _t| {
-                sp_cb.set_message(format!("Đang lồng tiếng {done}/{seg_total}..."))
-            },
+            move |done, _t| sp_cb.set_message(format!("Đang lồng tiếng {done}/{seg_total}...")),
             || false, // CLI has no cancellation; `FnMut` bound accepts plain fns
         )
         .await?;
@@ -497,20 +495,53 @@ pub async fn run(cli: &Cli, deps: Deps<'_>) -> anyhow::Result<Report> {
                 speed: crate::media::RenderSpeed::parse(&cli.render_speed),
                 crf: cli.crf,
             };
+
+            // --pad-subs: probe frame size, write a padded-layout ASS for the
+            // burn so subs land in the added black band below the picture.
+            // The exported .ass side file keeps the standard layout.
+            let (burn_ass, pad_px) = match cli.pad_subs {
+                Some(px) => {
+                    let (w, h) =
+                        crate::media::probe_video_size(ffmpeg, &cli.input).unwrap_or((1920, 1080));
+                    let pad = if px == 0 {
+                        crate::subtitle::ass::auto_sub_bar_height(h, cli.bilingual)
+                    } else {
+                        px & !1
+                    };
+                    let layout = crate::subtitle::ass::sub_bar_layout(w, h, pad, cli.bilingual);
+                    let padded = work_dir.join("subtitle_pad.ass");
+                    std::fs::write(
+                        &padded,
+                        crate::subtitle::ass::render_ass_with_layout(
+                            &segments,
+                            cli.bilingual,
+                            input_stem,
+                            &layout,
+                        ),
+                    )
+                    .with_context(|| {
+                        format!("failed to write padded ass at {}", padded.display())
+                    })?;
+                    (padded, pad)
+                }
+                None => (work_ass.clone(), 0),
+            };
+
             let cmd = if let Some((ref dw, has_audio)) = dub_track {
                 crate::media::build_hardsub_dub_command(
                     ffmpeg,
                     &cli.input,
-                    &work_ass,
+                    &burn_ass,
                     dw,
                     video_dest,
                     cli.dub_orig_volume,
                     has_audio,
+                    pad_px,
                     enc,
                 )?
             } else {
                 crate::media::build_hardsub_command(
-                    ffmpeg, &cli.input, &work_ass, video_dest, enc,
+                    ffmpeg, &cli.input, &burn_ass, video_dest, pad_px, enc,
                 )?
             };
             crate::media::run_ffmpeg(cmd, "hardsub video burn")?;
@@ -592,9 +623,8 @@ pub async fn run(cli: &Cli, deps: Deps<'_>) -> anyhow::Result<Report> {
                         .and_then(|s| s.to_str())
                         .unwrap_or("out")
                 ));
-                std::fs::copy(dw, &wav_dest).with_context(|| {
-                    format!("failed to copy dub wav to {}", wav_dest.display())
-                })?;
+                std::fs::copy(dw, &wav_dest)
+                    .with_context(|| format!("failed to copy dub wav to {}", wav_dest.display()))?;
                 outputs.push(wav_dest);
             }
         }
