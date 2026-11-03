@@ -149,3 +149,48 @@ async fn downloads_and_extracts_ffmpeg_tar_xz() {
     assert_eq!(ffmpeg, c.bin_dir.join("ffmpeg"));
     assert!(ffmpeg.is_file());
 }
+
+#[tokio::test]
+async fn extracts_ffmpeg_from_nested_bin_layout() {
+    // BtbN archives ship the binary at <dir>/bin/ffmpeg, not <dir>/ffmpeg.
+    let staging = tempfile::tempdir().unwrap();
+    let sub = staging.path().join("ffmpeg-n8.1-linux64-gpl").join("bin");
+    fs::create_dir_all(&sub).unwrap();
+    let script_path = sub.join("ffmpeg");
+    fs::write(
+        &script_path,
+        b"#!/bin/sh\nif [ \"$1\" = \"-version\" ]; then echo \"ffmpeg version 8.1\"; exit 0; fi\nexit 1\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let tar_path = staging.path().join("archive.tar.xz");
+    let status = Command::new("tar")
+        .args([
+            "-cJf",
+            tar_path.to_str().unwrap(),
+            "-C",
+            staging.path().to_str().unwrap(),
+            "ffmpeg-n8.1-linux64-gpl",
+        ])
+        .status()
+        .expect("tar command must succeed");
+    assert!(status.success());
+
+    let archive_bytes = fs::read(&tar_path).unwrap();
+
+    let server = MockServer::start().await;
+    Mock::given(path("/ffmpeg.tar.xz"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(archive_bytes))
+        .mount(&server)
+        .await;
+
+    let (_t, c) = cfg();
+    let ffmpeg_url = format!("{}/ffmpeg.tar.xz", server.uri());
+    let m = DependencyManager::with_urls(c.clone(), "unused".into(), ffmpeg_url);
+
+    let ffmpeg = m.find_or_download_ffmpeg().await.unwrap();
+    assert_eq!(ffmpeg, c.bin_dir.join("ffmpeg"));
+    assert!(ffmpeg.is_file());
+}

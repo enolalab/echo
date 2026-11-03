@@ -73,6 +73,13 @@ fn main() {
             download_youtube_items,
             cancel_youtube_download
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_, event| {
+            // Reap in-flight ffmpeg children — they'd otherwise outlive the
+            // app as orphans and keep burning CPU after the window closes.
+            if let tauri::RunEvent::Exit = event {
+                auto_subtitle::media::kill_all_children();
+            }
+        });
 }

@@ -101,6 +101,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [dubEnabled, setDubEnabled] = useState(!!dubDefaults);
   const [exportStage, setExportStage] = useState<'idle' | 'dubbing' | 'rendering'>('idle');
   const [dubCount, setDubCount] = useState<{ index: number; total: number } | null>(null);
+  const [renderCount, setRenderCount] = useState<{ index: number; total: number } | null>(null);
   const [batchMode, setBatchMode] = useState(false);
   const [fileProgress, setFileProgress] = useState<{ index: number; total: number; name: string } | null>(null);
   const jobIdRef = useRef<string | null>(null);
@@ -117,6 +118,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       setCopied(false);
       setExportStage('idle');
       setDubCount(null);
+      setRenderCount(null);
       setDubEnabled(!!dubDefaults);
       setRenderSpeed(initialRenderSpeed ?? 'balanced');
       setFileProgress(null);
@@ -170,6 +172,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     setErrorMsg(null);
     setExportStage(dubActive ? 'dubbing' : 'rendering');
     setDubCount(null);
+    setRenderCount(null);
 
     // Fire-and-forget: don't block onExport on listener registration —
     // outside Tauri (browser/test) this promise may never settle.
@@ -181,6 +184,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         setDubCount({ index: p.index, total: p.total });
       } else if (p.stage === 'rendering') {
         setExportStage('rendering');
+        if (p.total > 0) {
+          setRenderCount({ index: p.index, total: p.total });
+        }
       }
     }).catch(() => null);
 
@@ -196,6 +202,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         setFileProgress({ index: i + 1, total: items.length, name: baseName(it.videoPath) });
         setExportStage(dubActive ? 'dubbing' : 'rendering');
         setDubCount(null);
+        setRenderCount(null);
         const outPath = items.length > 1 ? batchOutPath(it.videoPath) : outputPath;
 
         try {
@@ -237,6 +244,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       void unlistenPromise.then((u) => u?.());
       setExportStage('idle');
       setDubCount(null);
+      setRenderCount(null);
       setFileProgress(null);
       setIsExporting(false);
     }
@@ -251,9 +259,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
   };
 
+  const activeCount = exportStage === 'dubbing' ? dubCount : renderCount;
+  const barPct =
+    activeCount && activeCount.total > 0
+      ? Math.min(100, Math.round((activeCount.index / activeCount.total) * 100))
+      : null;
+  const fmtSecs = (s: number) =>
+    `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 select-none">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col text-xs text-slate-200">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col text-xs text-slate-200">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-800/80 flex items-center justify-between bg-slate-950/40">
           <div className="flex items-center gap-2.5">
@@ -323,15 +339,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               <div className="w-full bg-slate-800/60 h-1.5 rounded-full overflow-hidden">
                 <div
                   data-testid="export-progress-bar"
-                  className={`h-full transition-all duration-300 ease-out ${
-                    exportStage === 'rendering'
-                      ? 'w-full bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 animate-pulse'
-                      : 'bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400'
+                  className={`h-full transition-all duration-300 ease-out bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 ${
+                    barPct == null && exportStage === 'rendering' ? 'w-full animate-pulse' : ''
                   }`}
                   style={
-                    exportStage === 'dubbing'
-                      ? { width: `${dubCount && dubCount.total > 0 ? Math.min(100, Math.round((dubCount.index / dubCount.total) * 100)) : 2}%` }
-                      : undefined
+                    barPct != null
+                      ? { width: `${barPct}%` }
+                      : exportStage === 'dubbing'
+                        ? { width: '2%' }
+                        : undefined
                   }
                 />
               </div>
@@ -350,11 +366,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                       ? 'Đang khởi tạo lồng tiếng...'
                       : mode === 'subs_only'
                         ? 'Đang ghi file phụ đề...'
-                        : 'Đang render video...'}
+                        : renderCount && renderCount.total > 0
+                          ? `Đang render ${fmtSecs(renderCount.index)} / ${fmtSecs(renderCount.total)}...`
+                          : 'Đang render video...'}
                 </span>
-                {exportStage === 'dubbing' && dubCount && dubCount.total > 0 && (
+                {barPct != null && (
                   <span className="bg-blue-950/80 text-blue-400 font-bold px-1.5 py-0.5 rounded border border-blue-800/50">
-                    {Math.round((dubCount.index / dubCount.total) * 100)}%
+                    {barPct}%
                   </span>
                 )}
               </div>
@@ -402,19 +420,18 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     type="button"
                     disabled={isExporting}
                     onClick={() => setMode(item.id)}
-                    className={`p-3.5 min-w-0 rounded-xl border text-left flex flex-col gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                    className={`p-3.5 min-w-0 overflow-hidden rounded-xl border text-left flex flex-col gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                       isSelected
                         ? 'bg-blue-600/10 border-blue-500 text-white shadow-sm ring-1 ring-blue-500/30'
                         : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 hover:bg-slate-850 text-slate-400'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-1.5">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Icon className={`w-4 h-4 shrink-0 ${isSelected ? item.color : 'text-slate-400'}`} />
-                        <span className={`font-semibold text-xs truncate ${isSelected ? 'text-white' : 'text-slate-300'}`}>
-                          {item.title}
-                        </span>
-                      </div>
+                    {/* flex-wrap lets the badge drop below the title instead of truncating it */}
+                    <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                      <Icon className={`w-4 h-4 shrink-0 ${isSelected ? item.color : 'text-slate-400'}`} />
+                      <span className={`font-semibold text-xs whitespace-nowrap ${isSelected ? 'text-white' : 'text-slate-300'}`}>
+                        {item.title}
+                      </span>
                       {item.badge && (
                         <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30 shrink-0">
                           {item.badge}

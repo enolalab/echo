@@ -5,7 +5,7 @@ use tokio::sync::broadcast;
 use auto_subtitle::config::AppConfig;
 use auto_subtitle::downloader::{DependencyManager, WHISPER_MODELS};
 use auto_subtitle::llm::build_chat_client;
-use auto_subtitle::media::{self, run_ffmpeg};
+use auto_subtitle::media;
 use auto_subtitle::settings::SettingsStore;
 use auto_subtitle::stt::whisper_api::ApiTranscriber;
 use auto_subtitle::stt::whisper_local::LocalWhisperTranscriber;
@@ -310,15 +310,24 @@ async fn run_pipeline(
     } else {
         media::build_extract_wav_command(&ffmpeg, &input_video, &audio_path)
     };
+    // spawn_blocking keeps running after select! drops the JoinHandle — the
+    // flag makes the ffmpeg child actually stop instead of running detached.
+    let extract_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag_in_task = extract_cancel.clone();
     let extract_res = tokio::select! {
-        res = tokio::task::spawn_blocking(move || run_ffmpeg(extract_cmd, "extract wav")) => Some(res),
+        res = tokio::task::spawn_blocking(move || {
+            media::run_ffmpeg_cancellable(extract_cmd, "extract wav", Some(flag_in_task), None)
+        }) => Some(res),
         _ = cancel_rx.recv() => None,
     };
     match extract_res {
         Some(Ok(Ok(()))) => {}
         Some(Ok(Err(e))) => return Err(format!("Lỗi trích xuất âm thanh: {e:#}")),
         Some(Err(e)) => return Err(format!("Lỗi luồng: {e:#}")),
-        None => return Err("Tiến trình đã bị người dùng hủy.".to_string()),
+        None => {
+            extract_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            return Err("Tiến trình đã bị người dùng hủy.".to_string());
+        }
     }
     emit_progress(
         &app,
@@ -761,6 +770,37 @@ pub async fn export_subtitles_core(
     state: Option<&AppState>,
     request: ExportRequest,
 ) -> Result<String, String> {
+    // One cancel channel per export job — shared by the dub and encode phases
+    // so `cancel_pipeline` stops whichever is running.
+    let job_key = request.job_id.clone().unwrap_or_else(|| "export".into());
+    let (cancel_tx, mut encode_cancel_rx) = broadcast::channel::<()>(1);
+    if let Some(s) = state {
+        s.cancel_senders
+            .lock()
+            .await
+            .insert(job_key.clone(), cancel_tx.clone());
+    }
+    let result = export_subtitles_inner(
+        app,
+        state,
+        request,
+        cancel_tx.subscribe(),
+        &mut encode_cancel_rx,
+    )
+    .await;
+    if let Some(s) = state {
+        s.cancel_senders.lock().await.remove(&job_key);
+    }
+    result
+}
+
+async fn export_subtitles_inner(
+    app: Option<AppHandle>,
+    state: Option<&AppState>,
+    request: ExportRequest,
+    mut dub_cancel_rx: broadcast::Receiver<()>,
+    encode_cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<String, String> {
     let app_config = get_app_config();
     let dm = DependencyManager::new(app_config);
     let ffmpeg = dm
@@ -784,13 +824,6 @@ pub async fn export_subtitles_core(
     let dub_track: Option<(PathBuf, bool)> =
         if let Some(dub) = request.dub.as_ref().filter(|d| d.enabled) {
             let state = state.ok_or("Lồng tiếng yêu cầu app state")?;
-            let job_key = request.job_id.clone().unwrap_or_else(|| "export".into());
-            let mut cancel_rx = {
-                let mut senders = state.cancel_senders.lock().await;
-                let (tx, rx) = broadcast::channel(1);
-                senders.insert(job_key.clone(), tx);
-                rx
-            };
             let engine = build_export_tts(&dm, dub, state).await?;
             let app_c = app.clone();
             let jid = request.job_id.clone();
@@ -815,14 +848,9 @@ pub async fn export_subtitles_core(
                         let _ = a.emit("pipeline-log", format!("Đang lồng tiếng {idx}/{total}..."));
                     }
                 },
-                move || cancel_rx.try_recv().is_ok(),
+                move || dub_cancel_rx.try_recv().is_ok(),
             )
             .await;
-            // Always release the cancel slot for this export (success or error).
-            {
-                let mut senders = state.cancel_senders.lock().await;
-                senders.remove(&job_key);
-            }
             Some(result.map_err(|e| format!("Lỗi lồng tiếng: {e:#}"))?)
         } else {
             None
@@ -852,10 +880,13 @@ pub async fn export_subtitles_core(
                 .ok()
         })
         .unwrap_or(false);
+    // Cap video bitrate at the input's so the re-encode can't balloon past
+    // the source's data rate (hardsub only — softsub copies the stream).
     let enc = media::EncoderOpts {
         nvenc: prefer_gpu && media::nvenc_available(&ffmpeg),
         speed: media::RenderSpeed::parse(&request.render_speed),
         crf: request.crf.min(51),
+        max_bitrate_kbps: media::probe_video_bitrate_kbps(&ffmpeg, &video_in),
     };
 
     match request.mode {
@@ -928,27 +959,73 @@ pub async fn export_subtitles_core(
             };
             let temp_ass = temp_dir.path().join(temp_name);
             std::fs::write(&temp_ass, ass_content).map_err(|e| e.to_string())?;
-            let cmd = if let Some((ref dw, has_audio)) = dub_track {
-                media::build_hardsub_dub_command(
-                    &ffmpeg,
-                    &video_in,
-                    &temp_ass,
-                    dw,
-                    &out_path,
-                    request.dub.as_ref().map(|d| d.orig_volume).unwrap_or(0.15),
-                    has_audio,
-                    pad_px,
+            let orig_volume = request.dub.as_ref().map(|d| d.orig_volume).unwrap_or(0.15);
+            let out_path_enc = out_path.clone();
+            // ffmpeg `-progress pipe:2` ticks → export-progress events so the
+            // modal shows a real percentage instead of an indeterminate bar.
+            let total_secs =
+                media::probe_duration_ms(&ffmpeg, &video_in).map(|ms| (ms / 1000) as usize);
+            let app_c = app.clone();
+            let jid = request.job_id.clone();
+            let on_progress = total_secs.map(|total| {
+                std::sync::Arc::new(move |out_us: u64| {
+                    if let Some(a) = &app_c {
+                        let _ = a.emit(
+                            "export-progress",
+                            ExportProgress {
+                                job_id: jid.clone(),
+                                stage: "rendering".into(),
+                                index: (out_us / 1_000_000) as usize,
+                                total,
+                            },
+                        );
+                    }
+                }) as std::sync::Arc<dyn Fn(u64) + Send + Sync>
+            });
+            let encode_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let flag_in_task = encode_cancel.clone();
+            let encode_handle = tokio::task::spawn_blocking(move || {
+                media::run_encode_with_cpu_fallback(
                     enc,
+                    "hardsub",
+                    |e| {
+                        if let Some((ref dw, has_audio)) = dub_track {
+                            media::build_hardsub_dub_command(
+                                &ffmpeg,
+                                &video_in,
+                                &temp_ass,
+                                dw,
+                                &out_path_enc,
+                                orig_volume,
+                                has_audio,
+                                pad_px,
+                                e,
+                            )
+                        } else {
+                            media::build_hardsub_command(
+                                &ffmpeg,
+                                &video_in,
+                                &temp_ass,
+                                &out_path_enc,
+                                pad_px,
+                                e,
+                            )
+                        }
+                    },
+                    Some(flag_in_task),
+                    on_progress,
                 )
-                .map_err(|e| format!("Lỗi tạo lệnh Hardsub: {e:#}"))?
-            } else {
-                media::build_hardsub_command(&ffmpeg, &video_in, &temp_ass, &out_path, pad_px, enc)
-                    .map_err(|e| format!("Lỗi tạo lệnh Hardsub: {e:#}"))?
-            };
-            tokio::task::spawn_blocking(move || run_ffmpeg(cmd, "hardsub"))
-                .await
-                .map_err(|e| e.to_string())?
-                .map_err(|e| format!("Lỗi xuất Hardsub: {e:#}"))?;
+            });
+            tokio::select! {
+                res = encode_handle => {
+                    res.map_err(|e| e.to_string())?
+                        .map_err(|e| format!("Lỗi xuất Hardsub: {e:#}"))?;
+                }
+                _ = encode_cancel_rx.recv() => {
+                    encode_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return Err("Tiến trình đã bị người dùng hủy.".to_string());
+                }
+            }
             Ok(format!(
                 "Đã xuất video Hardsub thành công: {}",
                 out_path.display()
@@ -973,10 +1050,40 @@ pub async fn export_subtitles_core(
                 media::build_softsub_command(&ffmpeg, &video_in, &temp_srt, &out_path)
                     .map_err(|e| format!("Lỗi tạo lệnh Softsub: {e:#}"))?
             };
-            tokio::task::spawn_blocking(move || run_ffmpeg(cmd, "softsub"))
-                .await
-                .map_err(|e| e.to_string())?
-                .map_err(|e| format!("Lỗi xuất Softsub: {e:#}"))?;
+            let total_secs =
+                media::probe_duration_ms(&ffmpeg, &video_in).map(|ms| (ms / 1000) as usize);
+            let app_c = app.clone();
+            let jid = request.job_id.clone();
+            let on_progress = total_secs.map(|total| {
+                std::sync::Arc::new(move |out_us: u64| {
+                    if let Some(a) = &app_c {
+                        let _ = a.emit(
+                            "export-progress",
+                            ExportProgress {
+                                job_id: jid.clone(),
+                                stage: "rendering".into(),
+                                index: (out_us / 1_000_000) as usize,
+                                total,
+                            },
+                        );
+                    }
+                }) as std::sync::Arc<dyn Fn(u64) + Send + Sync>
+            });
+            let encode_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let flag_in_task = encode_cancel.clone();
+            let encode_handle = tokio::task::spawn_blocking(move || {
+                media::run_ffmpeg_cancellable(cmd, "softsub", Some(flag_in_task), on_progress)
+            });
+            tokio::select! {
+                res = encode_handle => {
+                    res.map_err(|e| e.to_string())?
+                        .map_err(|e| format!("Lỗi xuất Softsub: {e:#}"))?;
+                }
+                _ = encode_cancel_rx.recv() => {
+                    encode_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return Err("Tiến trình đã bị người dùng hủy.".to_string());
+                }
+            }
             Ok(format!(
                 "Đã xuất video Softsub thành công: {}",
                 out_path.display()

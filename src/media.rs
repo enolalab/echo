@@ -1,6 +1,9 @@
 use anyhow::Context;
+use std::collections::HashMap;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// 16 kHz mono s16le WAV for local Whisper.
 pub fn build_extract_wav_command(ffmpeg: &Path, video: &Path, out_wav: &Path) -> Command {
@@ -85,6 +88,9 @@ pub struct EncoderOpts {
     pub speed: RenderSpeed,
     /// CRF/CQ quality target (0-51): lower = better quality, larger file.
     pub crf: u8,
+    /// VBV cap in kb/s (usually the input's video bitrate) so the re-encode
+    /// can't balloon past the source's data rate; None = uncapped CRF.
+    pub max_bitrate_kbps: Option<u32>,
 }
 
 /// Push `-hwaccel cuda` before an input arg (only for the NVENC path):
@@ -122,6 +128,12 @@ fn push_video_encoder(cmd: &mut Command, enc: EncoderOpts) {
             .arg("-crf")
             .arg(enc.crf.to_string());
     }
+    if let Some(kbps) = enc.max_bitrate_kbps {
+        cmd.arg("-maxrate")
+            .arg(format!("{kbps}k"))
+            .arg("-bufsize")
+            .arg(format!("{}k", kbps.saturating_mul(2)));
+    }
 }
 
 fn output_ext(path: &Path) -> String {
@@ -150,6 +162,57 @@ pub fn probe_video_size(ffmpeg: &Path, video: &Path) -> Option<(u32, u32)> {
         .output()
         .ok()?;
     parse_video_size(&String::from_utf8_lossy(&out.stderr))
+}
+
+/// Parse the video stream bitrate (kb/s) from `ffmpeg -i` stderr. Falls back
+/// to 85% of the container's overall bitrate when the stream line has none.
+pub fn parse_video_bitrate_kbps(stderr: &str) -> Option<u32> {
+    static RE_STREAM: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static RE_TOTAL: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re_stream = RE_STREAM
+        .get_or_init(|| regex::Regex::new(r"Stream[^\n]*Video:[^\n]*?(\d+)\s*kb/s").unwrap());
+    if let Some(c) = re_stream.captures(stderr) {
+        return c[1].parse().ok();
+    }
+    let re_total = RE_TOTAL.get_or_init(|| regex::Regex::new(r"bitrate:\s*(\d+)\s*kb/s").unwrap());
+    re_total
+        .captures(stderr)
+        .and_then(|c| c[1].parse::<u32>().ok())
+        .map(|kbps| kbps * 85 / 100)
+}
+
+/// `ffmpeg -i <video>` probe → video bitrate in kb/s (None if unknown).
+pub fn probe_video_bitrate_kbps(ffmpeg: &Path, video: &Path) -> Option<u32> {
+    let out = std::process::Command::new(ffmpeg)
+        .arg("-hide_banner")
+        .arg("-i")
+        .arg(video)
+        .output()
+        .ok()?;
+    parse_video_bitrate_kbps(&String::from_utf8_lossy(&out.stderr))
+}
+
+/// Parse `Duration: HH:MM:SS.cc` from `ffmpeg -i` stderr → milliseconds.
+pub fn parse_duration_ms(stderr: &str) -> Option<u64> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re =
+        RE.get_or_init(|| regex::Regex::new(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)").unwrap());
+    let c = re.captures(stderr)?;
+    let h: u64 = c[1].parse().ok()?;
+    let m: u64 = c[2].parse().ok()?;
+    let s: f64 = c[3].parse().ok()?;
+    Some((h * 3600 + m * 60) as u64 * 1000 + (s * 1000.0) as u64)
+}
+
+/// `ffmpeg -i <video>` probe → container duration in ms (None if unknown).
+pub fn probe_duration_ms(ffmpeg: &Path, video: &Path) -> Option<u64> {
+    let out = std::process::Command::new(ffmpeg)
+        .arg("-hide_banner")
+        .arg("-i")
+        .arg(video)
+        .output()
+        .ok()?;
+    parse_duration_ms(&String::from_utf8_lossy(&out.stderr))
 }
 
 /// Codec for a newly injected srt track by container: mp4-family needs mov_text.
@@ -237,7 +300,9 @@ pub fn build_hardsub_command(
     cmd.arg("-hide_banner")
         .arg("-loglevel")
         .arg("error")
-        .arg("-y");
+        .arg("-y")
+        .arg("-progress")
+        .arg("pipe:2");
     push_hwaccel(&mut cmd, enc);
     cmd.arg("-i")
         .arg(&abs_video)
@@ -310,7 +375,9 @@ pub fn build_hardsub_dub_command(
     cmd.arg("-hide_banner")
         .arg("-loglevel")
         .arg("error")
-        .arg("-y");
+        .arg("-y")
+        .arg("-progress")
+        .arg("pipe:2");
     // hwaccel applies only to the video input (first -i).
     push_hwaccel(&mut cmd, enc);
     cmd.arg("-i")
@@ -350,6 +417,8 @@ pub fn build_softsub_dub_command(
         .arg("-loglevel")
         .arg("error")
         .arg("-y")
+        .arg("-progress")
+        .arg("pipe:2")
         .arg("-i")
         .arg(video)
         .arg("-i")
@@ -394,6 +463,8 @@ pub fn build_softsub_command(
         .arg("-loglevel")
         .arg("error")
         .arg("-y")
+        .arg("-progress")
+        .arg("pipe:2")
         .arg("-i")
         .arg(video)
         .arg("-i")
@@ -456,13 +527,179 @@ pub fn wav_duration_ms(path: &Path) -> anyhow::Result<u64> {
     Ok(r.duration() as u64 * 1000 / spec.sample_rate as u64)
 }
 
+/// ffmpeg children currently in flight, keyed by pid. Lets the host app reap
+/// them all on exit — a spawned ffmpeg would otherwise outlive the process as
+/// an orphan (observed: an encode burned ~1.5h after the app had closed).
+fn running_children() -> &'static Mutex<HashMap<u32, Child>> {
+    static M: OnceLock<Mutex<HashMap<u32, Child>>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Kill every in-flight ffmpeg child. Idempotent; call when the host process
+/// exits (or as a last-resort stop for all jobs).
+pub fn kill_all_children() {
+    if let Ok(mut map) = running_children().lock() {
+        for (_, mut c) in map.drain() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+}
+
+/// Run a re-encode command built by `rebuild(enc)`. When the NVENC path fails
+/// at runtime (encoder listed but driver/API/context unusable), retry once on
+/// libx264 instead of aborting the export — except on cancel, which stops.
+pub fn run_encode_with_cpu_fallback<F>(
+    enc: EncoderOpts,
+    what: &str,
+    rebuild: F,
+    cancel: Option<Arc<AtomicBool>>,
+    on_progress: Option<Arc<dyn Fn(u64) + Send + Sync>>,
+) -> anyhow::Result<()>
+where
+    F: Fn(EncoderOpts) -> anyhow::Result<Command>,
+{
+    let cmd = rebuild(enc)?;
+    match run_ffmpeg_cancellable(cmd, what, cancel.clone(), on_progress.clone()) {
+        Err(e) if enc.nvenc => {
+            // A cancelled job must not be retried — killing nvenc would just
+            // restart the same encode on x264 for minutes.
+            if cancel.as_ref().is_some_and(|f| f.load(Ordering::Relaxed)) {
+                return Err(e);
+            }
+            let cpu = EncoderOpts {
+                nvenc: false,
+                ..enc
+            };
+            run_ffmpeg_cancellable(rebuild(cpu)?, what, cancel, on_progress).map_err(|cpu_e| {
+                anyhow::anyhow!("nvenc failed: {e:#}; libx264 retry also failed: {cpu_e:#}")
+            })
+        }
+        r => r,
+    }
+}
+
 /// Runs the command; on non-zero exit returns Err containing the last 20 stderr lines.
-pub fn run_ffmpeg(mut cmd: Command, what: &str) -> anyhow::Result<()> {
-    let output = cmd
-        .output()
+pub fn run_ffmpeg(cmd: Command, what: &str) -> anyhow::Result<()> {
+    run_ffmpeg_cancellable(cmd, what, None, None)
+}
+
+/// `-progress` lines ffmpeg writes — parsed for the callback, kept out of the
+/// error tail so real diagnostics aren't pushed out by progress spam.
+fn is_progress_line(l: &str) -> bool {
+    const KEYS: [&str; 11] = [
+        "frame=",
+        "fps=",
+        "stream_",
+        "bitrate=",
+        "total_size=",
+        "out_time_us=",
+        "out_time_ms=",
+        "out_time=",
+        "dup_frames=",
+        "drop_frames=",
+        "speed=",
+    ];
+    l.starts_with("progress=") || KEYS.iter().any(|k| l.starts_with(k))
+}
+
+/// Runs the command, killing the child promptly when `cancel` flips true.
+/// `on_progress` receives `out_time_us` ticks when the command was built with
+/// `-progress pipe:2`. On non-zero exit returns Err with the stderr tail.
+pub fn run_ffmpeg_cancellable(
+    mut cmd: Command,
+    what: &str,
+    cancel: Option<Arc<AtomicBool>>,
+    on_progress: Option<Arc<dyn Fn(u64) + Send + Sync>>,
+) -> anyhow::Result<()> {
+    if cancel.as_ref().is_some_and(|f| f.load(Ordering::Relaxed)) {
+        anyhow::bail!("{what} cancelled");
+    }
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
         .with_context(|| format!("failed to execute ffmpeg for {what}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    let pid = child.id();
+    // Drain stderr on a side thread: while we poll try_wait, a filled pipe
+    // buffer would otherwise block the child. Delivered over a channel —
+    // recv_timeout'd below, because a grandchild inheriting the pipe would
+    // keep read_to_end (and thus a plain join) blocked past the kill.
+    let stderr_pipe = child.stderr.take().expect("stderr is piped");
+    let (stderr_tx, stderr_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let mut rd = std::io::BufReader::new(stderr_pipe);
+        let mut buf = Vec::new();
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match rd.read_line(&mut line) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {
+                    let l = line.trim_end();
+                    if let Some(us) = l
+                        .strip_prefix("out_time_ms=")
+                        .and_then(|v| v.parse::<u64>().ok())
+                    {
+                        if let Some(cb) = &on_progress {
+                            cb(us);
+                        }
+                    }
+                    if !is_progress_line(l) {
+                        buf.extend_from_slice(l.as_bytes());
+                        buf.push(b'\n');
+                    }
+                }
+            }
+        }
+        let _ = stderr_tx.send(buf);
+    });
+    if let Ok(mut m) = running_children().lock() {
+        m.insert(pid, child);
+    }
+
+    let mut cancelled = false;
+    let status = loop {
+        let done = {
+            let mut map = running_children().lock().unwrap();
+            match map.get_mut(&pid) {
+                // Entry reaped by kill_all_children → the child is gone.
+                None => break None,
+                Some(c) => c.try_wait(),
+            }
+        };
+        match done {
+            Ok(Some(s)) => break Some(s),
+            Ok(None) => {}
+            Err(e) => {
+                running_children().lock().unwrap().remove(&pid);
+                return Err(e).context(format!("failed to wait on ffmpeg for {what}"));
+            }
+        }
+        if cancel.as_ref().is_some_and(|f| f.load(Ordering::Relaxed)) {
+            if let Ok(mut map) = running_children().lock() {
+                if let Some(mut c) = map.remove(&pid) {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                }
+            }
+            cancelled = true;
+            break None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    running_children().lock().unwrap().remove(&pid);
+    let buf = stderr_rx
+        .recv_timeout(std::time::Duration::from_millis(500))
+        .unwrap_or_default();
+
+    if cancelled {
+        anyhow::bail!("{what} cancelled");
+    }
+    let status = status.with_context(|| format!("ffmpeg for {what} was killed"))?;
+    if !status.success() {
+        let stderr = String::from_utf8_lossy(&buf);
         let lines: Vec<&str> = stderr.lines().collect();
         let tail_lines = if lines.len() > 20 {
             &lines[lines.len() - 20..]
@@ -472,8 +709,7 @@ pub fn run_ffmpeg(mut cmd: Command, what: &str) -> anyhow::Result<()> {
         let tail = tail_lines.join("\n");
         anyhow::bail!(
             "ffmpeg failed for {what} (exit code: {}):\n{tail}",
-            output
-                .status
+            status
                 .code()
                 .map_or_else(|| "terminated by signal".to_string(), |c| c.to_string())
         );
@@ -503,6 +739,7 @@ mod tests {
                 nvenc: false,
                 speed: RenderSpeed::Balanced,
                 crf: 20,
+                max_bitrate_kbps: Some(600),
             },
         )
         .unwrap();

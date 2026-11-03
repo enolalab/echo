@@ -494,6 +494,7 @@ pub async fn run(cli: &Cli, deps: Deps<'_>) -> anyhow::Result<Report> {
                 nvenc: !cli.no_gpu && crate::media::nvenc_available(ffmpeg),
                 speed: crate::media::RenderSpeed::parse(&cli.render_speed),
                 crf: cli.crf,
+                max_bitrate_kbps: crate::media::probe_video_bitrate_kbps(ffmpeg, &cli.input),
             };
 
             // --pad-subs: probe frame size, write a padded-layout ASS for the
@@ -527,24 +528,31 @@ pub async fn run(cli: &Cli, deps: Deps<'_>) -> anyhow::Result<Report> {
                 None => (work_ass.clone(), 0),
             };
 
-            let cmd = if let Some((ref dw, has_audio)) = dub_track {
-                crate::media::build_hardsub_dub_command(
-                    ffmpeg,
-                    &cli.input,
-                    &burn_ass,
-                    dw,
-                    video_dest,
-                    cli.dub_orig_volume,
-                    has_audio,
-                    pad_px,
-                    enc,
-                )?
-            } else {
-                crate::media::build_hardsub_command(
-                    ffmpeg, &cli.input, &burn_ass, video_dest, pad_px, enc,
-                )?
-            };
-            crate::media::run_ffmpeg(cmd, "hardsub video burn")?;
+            crate::media::run_encode_with_cpu_fallback(
+                enc,
+                "hardsub video burn",
+                |e| {
+                    if let Some((ref dw, has_audio)) = dub_track {
+                        crate::media::build_hardsub_dub_command(
+                            ffmpeg,
+                            &cli.input,
+                            &burn_ass,
+                            dw,
+                            video_dest,
+                            cli.dub_orig_volume,
+                            has_audio,
+                            pad_px,
+                            e,
+                        )
+                    } else {
+                        crate::media::build_hardsub_command(
+                            ffmpeg, &cli.input, &burn_ass, video_dest, pad_px, e,
+                        )
+                    }
+                },
+                None, // CLI cancellation is handled by the SIGINT/SIGTERM hook
+                None,
+            )?;
             sp.finish_and_clear();
             outputs.push(video_dest.clone());
 

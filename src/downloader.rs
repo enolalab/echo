@@ -25,8 +25,12 @@ pub const WHISPER_MODELS: &[&str] = &[
 ];
 
 const DEFAULT_MODEL_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+// BtbN build: unlike johnvansickle's minimal static build this ships the
+// NVENC encoders (h264/hevc/av1_nvenc) + cuda hwaccel, so the GPU render path
+// actually works. Pin the n8.1 branch (not master): master requires newer
+// nvenc APIs than many installed drivers provide.
 const DEFAULT_FFMPEG_URL: &str =
-    "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz";
+    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz";
 
 #[derive(Debug, Clone)]
 pub struct DependencyManager {
@@ -128,15 +132,20 @@ impl DependencyManager {
         if direct.is_file() {
             found_ffmpeg = Some(direct);
         } else {
+            // Archive layouts: <dir>/ffmpeg (johnvansickle) or <dir>/bin/ffmpeg (BtbN).
             for entry in fs::read_dir(temp_dir.path()).with_context(|| {
                 format!("failed to read directory {}", temp_dir.path().display())
             })? {
                 let entry = entry.context("failed to read directory entry")?;
                 let path = entry.path();
                 if path.is_dir() {
-                    let candidate = path.join("ffmpeg");
-                    if candidate.is_file() {
-                        found_ffmpeg = Some(candidate);
+                    for candidate in [path.join("ffmpeg"), path.join("bin").join("ffmpeg")] {
+                        if candidate.is_file() {
+                            found_ffmpeg = Some(candidate);
+                            break;
+                        }
+                    }
+                    if found_ffmpeg.is_some() {
                         break;
                     }
                 }

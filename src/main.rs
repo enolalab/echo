@@ -281,6 +281,28 @@ async fn run_app() -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() {
+    // Kill in-flight ffmpeg children on Ctrl+C/SIGTERM — the default signal
+    // handling would exit the process and orphan them.
+    tokio::spawn(async {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut term = signal(SignalKind::terminate()).ok();
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = async {
+                    match term.as_mut() {
+                        Some(t) => { t.recv().await; }
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {}
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = tokio::signal::ctrl_c().await;
+        auto_subtitle::media::kill_all_children();
+        std::process::exit(130);
+    });
     if let Err(err) = run_app().await {
         eprintln!("{err:#}");
         std::process::exit(1);
