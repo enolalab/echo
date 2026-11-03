@@ -34,7 +34,11 @@ import type {
   GeneralSettings,
   SettingsView,
   PipelineStageEvent,
+  PipelineProgressEvent,
   BatchJob,
+  ExportRequest,
+  ExportTask,
+  ExportProgress,
 } from './types';
 
 let jobCounter = 0;
@@ -72,6 +76,9 @@ export default function App() {
   const [jobs, setJobs] = useState<BatchJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
+  // Background export queue — exports run outside the modal like pipeline jobs
+  const [exportTasks, setExportTasks] = useState<ExportTask[]>([]);
+
   // Subtitle & Playback state
   const [currentTimeMs, setCurrentTimeMs] = useState(0);
   const [seekTimeMs, setSeekTimeMs] = useState<number | null>(null);
@@ -85,6 +92,10 @@ export default function App() {
 
   const jobsRef = useRef(jobs);
   jobsRef.current = jobs;
+  const exportTasksRef = useRef(exportTasks);
+  exportTasksRef.current = exportTasks;
+  const exportPumpRef = useRef(false);
+  const stopExportRef = useRef(false);
 
   // YouTube video ids already in the queue (from "[id]" filename suffix)
   const existingYoutubeIds = useMemo(() => {
@@ -203,6 +214,28 @@ export default function App() {
 
     return () => {
       if (unlistenLog) unlistenLog();
+    };
+  }, []);
+
+  // Route ffmpeg export progress ticks to their export task
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+    listen<ExportProgress>('export-progress', (e) => {
+      const p = e.payload;
+      if (!p.job_id) return;
+      setExportTasks((prev) =>
+        prev.map((t) =>
+          t.id === p.job_id ? { ...t, stage: p.stage, index: p.index, total: p.total } : t
+        )
+      );
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => undefined);
+    return () => {
+      if (unlisten) unlisten();
     };
   }, []);
 
@@ -382,6 +415,89 @@ export default function App() {
   const handleCancel = () => cancelQueue();
   const handleCancelJob = (id: string) => cancelQueue(id);
 
+  // --- Background export queue -------------------------------------------------
+  // Exports run here (not inside the modal) so the user can keep working while
+  // ffmpeg renders. Tasks show in the job list and drive the progress drawer.
+
+  const updateExportTask = useCallback((id: string, patch: Partial<ExportTask>) => {
+    setExportTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  }, []);
+
+  // Sequential pump — one ffmpeg encode at a time. Safe to call repeatedly;
+  // a running pump picks up newly queued tasks on its next iteration.
+  const pumpExportQueue = useCallback(async () => {
+    if (exportPumpRef.current) return;
+    exportPumpRef.current = true;
+    try {
+      while (!stopExportRef.current) {
+        const task = exportTasksRef.current.find((t) => t.status === 'queued');
+        if (!task) break;
+        updateExportTask(task.id, { status: 'running', stage: null, index: 0, total: 0 });
+        setLogs((prev) => [...prev, `[XUẤT] Bắt đầu: ${task.label}`]);
+        try {
+          const out = await exportSubtitles(task.request);
+          updateExportTask(task.id, { status: 'done' });
+          const src = jobsRef.current.find((j) => j.videoPath === task.request.video_path);
+          if (src) updateJob(src.id, { outputVideoPath: out });
+          setLogs((prev) => [...prev, `[XUẤT] ${task.label} → ${out}`]);
+          pushToast(`Xuất xong: ${task.label}`, 'success');
+        } catch (err) {
+          const msg = String(err);
+          const cancelled = msg.includes('hủy') || msg.includes('cancel');
+          updateExportTask(task.id, {
+            status: cancelled ? 'cancelled' : 'error',
+            error: msg,
+          });
+          setLogs((prev) => [...prev, `[LỖI XUẤT] ${task.label}: ${msg}`]);
+          pushToast(`Xuất lỗi ${task.label}: ${msg}`, 'error');
+          if (cancelled) stopExportRef.current = true;
+        }
+      }
+    } finally {
+      exportPumpRef.current = false;
+    }
+  }, [pushToast, updateExportTask, updateJob]);
+
+  // Modal hands us fully-built requests; we queue them and run in background.
+  const handleStartExports = useCallback(
+    (requests: ExportRequest[]) => {
+      stopExportRef.current = false;
+      const tasks: ExportTask[] = requests.map((r, i) => ({
+        id: r.job_id ?? `export-${Date.now()}-${i}`,
+        label: r.video_path.split(/[/\\]/).pop() ?? r.video_path,
+        outputPath: r.output_path,
+        request: r,
+        status: 'queued' as const,
+        stage: null,
+        index: 0,
+        total: 0,
+        error: null,
+      }));
+      setExportTasks((prev) => [...prev, ...tasks]);
+      setLogs((prev) => [...prev, `[XUẤT] Đã thêm ${tasks.length} file vào hàng đợi xuất`]);
+      pushToast(
+        tasks.length > 1
+          ? `Đã thêm ${tasks.length} export vào hàng đợi — đang chạy nền`
+          : `Đã thêm export vào hàng đợi — đang chạy nền`,
+        'info'
+      );
+      void pumpExportQueue();
+    },
+    [pushToast, pumpExportQueue]
+  );
+
+  // Cancel one export task — backend kills ffmpeg via the shared cancel map.
+  const handleCancelExport = useCallback((id: string) => {
+    void cancelPipeline(id).catch((err) => console.error('Cancel export failed:', err));
+    setExportTasks((prev) =>
+      prev.map((t) => (t.id === id && t.status === 'queued' ? { ...t, status: 'cancelled' } : t))
+    );
+  }, []);
+
+  const handleRemoveExport = useCallback((id: string) => {
+    setExportTasks((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
   // Subtitle editor operations — applied to the selected job
   const updateSelectedSegments = (fn: (segs: SubtitleSegment[]) => SubtitleSegment[]) => {
     if (!selectedJobId) return;
@@ -487,7 +603,35 @@ export default function App() {
     selectedJob && selectedJob.progress
       ? selectedJob
       : jobs.find((j) => j.status === 'running') ?? null;
-  const drawerProgress = progressJob?.progress ?? null;
+
+  // Synthesize a drawer progress event from the running export (if no
+  // pipeline progress is active) — same shape, export stage keys.
+  const runningExport = exportTasks.find((t) => t.status === 'running') ?? null;
+  const exportProgress: PipelineProgressEvent | null = runningExport
+    ? {
+        job_id: runningExport.id,
+        stage: runningExport.stage === 'dubbing' ? 'dubbing' : 'rendering',
+        message:
+          runningExport.stage === 'dubbing'
+            ? runningExport.total > 0
+              ? `Lồng tiếng ${runningExport.index}/${runningExport.total} — ${runningExport.label}`
+              : `Đang lồng tiếng — ${runningExport.label}`
+            : runningExport.total > 0
+              ? `Đang render ${Math.floor(runningExport.index / 60)}:${String(
+                  Math.floor(runningExport.index % 60)
+                ).padStart(2, '0')}/${Math.floor(runningExport.total / 60)}:${String(
+                  Math.floor(runningExport.total % 60)
+                ).padStart(2, '0')} — ${runningExport.label}`
+              : `Đang xuất — ${runningExport.label}`,
+        percentage:
+          runningExport.total > 0
+            ? Math.min(100, (runningExport.index / runningExport.total) * 100)
+            : 5,
+        elapsed_secs: 0,
+      }
+    : null;
+
+  const drawerProgress = progressJob?.progress ?? exportProgress;
   const drawerStage: PipelineStageEvent | null = drawerProgress
     ? { stage: drawerProgress.stage, message: drawerProgress.message }
     : null;
@@ -563,6 +707,9 @@ export default function App() {
                     skillOptions={settingsView ? allSkills(settingsView).map((s) => ({ id: s.id, name: s.name })) : []}
                     defaultSkillName={skillName(settingsView, settingsView?.default_skill_id)}
                     onChangeJobSkill={handleChangeJobSkill}
+                    exportTasks={exportTasks}
+                    onCancelExport={handleCancelExport}
+                    onRemoveExport={handleRemoveExport}
                   />
                 </div>
               </div>
@@ -592,6 +739,7 @@ export default function App() {
         progress={drawerProgress}
         logs={logs}
         isRunning={isRunning}
+        exportRunning={runningExport !== null}
         onOpenExport={() => setIsExportOpen(true)}
         canExport={segments.length > 0}
       />
@@ -619,11 +767,7 @@ export default function App() {
         batchItems={jobs
           .filter((j) => j.status === 'done' && j.segments.length > 0)
           .map((j) => ({ videoPath: j.videoPath, segments: j.segments }))}
-        onExport={exportSubtitles}
-        onOpenFolder={openInFileManager}
-        onExported={(path) => {
-          if (selectedJobId) updateJob(selectedJobId, { outputVideoPath: path });
-        }}
+        onStartExport={handleStartExports}
       />
 
       {/* 5. YouTube Import Modal (kept mounted so background downloads still queue) */}

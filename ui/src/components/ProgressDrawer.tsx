@@ -7,6 +7,8 @@ interface ProgressDrawerProps {
   progress: PipelineProgressEvent | null;
   logs: string[];
   isRunning: boolean;
+  /** A background export is running — drives the bar/badge when pipeline is idle. */
+  exportRunning?: boolean;
   onOpenExport: () => void;
   canExport: boolean;
 }
@@ -16,6 +18,12 @@ const STAGES = [
   { key: 'stt', label: 'Whisper STT' },
   { key: 'translate', label: 'LLM Dịch' },
   { key: 'ready', label: 'Sẵn Sàng' },
+] as const;
+
+// Shown in place of the pipeline breadcrumb while an export runs
+const EXPORT_STAGES = [
+  { key: 'dubbing', label: 'Lồng Tiếng' },
+  { key: 'rendering', label: 'Render Video' },
 ] as const;
 
 function formatElapsed(secs: number): string {
@@ -29,6 +37,7 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
   progress,
   logs,
   isRunning,
+  exportRunning = false,
   onOpenExport,
   canExport,
 }) => {
@@ -46,13 +55,19 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
   };
 
   const activeStageKey = progress?.stage || currentStage?.stage;
+  const isExportStage = activeStageKey === 'dubbing' || activeStageKey === 'rendering';
+  const stages = isExportStage ? EXPORT_STAGES : STAGES;
+  const busy = isRunning || exportRunning;
   const getStageIndex = (stageKey?: string) => {
     if (!stageKey) return -1;
-    return STAGES.findIndex((s) => s.key === stageKey);
+    return stages.findIndex((s) => s.key === stageKey);
   };
 
   const currentIndex = getStageIndex(activeStageKey);
-  const percentage = progress?.percentage ?? (currentIndex === 3 ? 100 : isRunning ? 5 : 0);
+  const pipelineDoneIndex = STAGES.length - 1;
+  const percentage =
+    progress?.percentage ??
+    (currentIndex === pipelineDoneIndex && !isExportStage ? 100 : busy ? 5 : 0);
 
   return (
     <div className="bg-slate-900 border-t border-slate-800 text-xs z-10 transition-all select-none">
@@ -63,7 +78,7 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
           className={`h-full transition-all duration-300 ease-out ${
             percentage >= 100
               ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]'
-              : isRunning
+              : busy
               ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 shadow-[0_0_8px_rgba(59,130,246,0.5)]'
               : 'bg-slate-700'
           }`}
@@ -75,9 +90,11 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
       <div className="h-12 px-4 flex items-center justify-between gap-4">
         {/* Stages breadcrumb */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {STAGES.map((s, idx) => {
-            const isDone = currentIndex > idx || (currentIndex === 3 && idx === 3);
-            const isCurrent = currentIndex === idx && isRunning;
+          {stages.map((s, idx) => {
+            const isDone =
+              currentIndex > idx ||
+              (currentIndex === stages.length - 1 && idx === stages.length - 1 && !busy);
+            const isCurrent = currentIndex === idx && busy;
 
             return (
               <React.Fragment key={s.key}>
@@ -100,7 +117,7 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
                   <span>{s.label}</span>
                 </div>
 
-                {idx < STAGES.length - 1 && <ChevronRight className="w-3 h-3 text-slate-700 shrink-0" />}
+                {idx < stages.length - 1 && <ChevronRight className="w-3 h-3 text-slate-700 shrink-0" />}
               </React.Fragment>
             );
           })}
@@ -108,7 +125,7 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
 
         {/* Current status & Progress badge */}
         <div className="flex-1 min-w-0 flex items-center justify-center gap-2 px-2 text-[11px]">
-          {isRunning && (
+          {busy && (
             <span
               data-testid="progress-percentage-badge"
               className="bg-blue-950/80 text-blue-400 font-bold px-1.5 py-0.5 rounded border border-blue-800/50 shrink-0"
@@ -118,10 +135,10 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
           )}
 
           <span className="truncate text-slate-300">
-            {progress?.message || currentStage?.message || (isRunning ? 'Đang khởi chạy...' : 'Sẵn sàng')}
+            {progress?.message || currentStage?.message || (busy ? 'Đang khởi chạy...' : 'Sẵn sàng')}
           </span>
 
-          {isRunning && progress && progress.elapsed_secs > 0 && (
+          {busy && progress && progress.elapsed_secs > 0 && (
             <span
               data-testid="progress-timer"
               className="text-slate-400 bg-slate-800/70 px-1.5 py-0.5 rounded border border-slate-700/60 text-[10px] shrink-0"

@@ -1,6 +1,6 @@
 import React from 'react';
-import { FileVideo, Loader2, CheckCircle2, XCircle, Clock, X, Square, FolderOpen } from 'lucide-react';
-import type { BatchJob } from '../types';
+import { FileVideo, Loader2, CheckCircle2, XCircle, Clock, X, Square, FolderOpen, Clapperboard } from 'lucide-react';
+import type { BatchJob, ExportTask } from '../types';
 
 interface JobListProps {
   jobs: BatchJob[];
@@ -12,6 +12,10 @@ interface JobListProps {
   skillOptions: { id: string; name: string }[];
   defaultSkillName: string | null;
   onChangeJobSkill: (jobId: string, skillId: string | undefined) => void;
+  /** Background export queue — rendered as its own section below jobs. */
+  exportTasks?: ExportTask[];
+  onCancelExport?: (id: string) => void;
+  onRemoveExport?: (id: string) => void;
 }
 
 function fileName(path: string): string {
@@ -68,6 +72,47 @@ function StatusBadge({ job }: { job: BatchJob }) {
   }
 }
 
+function ExportTaskBadge({ task }: { task: ExportTask }) {
+  const pct = task.total > 0 ? Math.round((task.index / task.total) * 100) : 0;
+  switch (task.status) {
+    case 'running':
+      return (
+        <span className="flex items-center gap-1 text-blue-400">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          <span>{task.total > 0 ? `${pct}%` : 'Đang chạy'}</span>
+        </span>
+      );
+    case 'done':
+      return (
+        <span className="flex items-center gap-1 text-emerald-400">
+          <CheckCircle2 className="w-3 h-3" />
+          <span>{STATUS_LABEL.done}</span>
+        </span>
+      );
+    case 'error':
+      return (
+        <span className="flex items-center gap-1 text-rose-400">
+          <XCircle className="w-3 h-3" />
+          <span>{STATUS_LABEL.error}</span>
+        </span>
+      );
+    case 'cancelled':
+      return (
+        <span className="flex items-center gap-1 text-amber-400">
+          <Square className="w-3 h-3" />
+          <span>{STATUS_LABEL.cancelled}</span>
+        </span>
+      );
+    default:
+      return (
+        <span className="flex items-center gap-1 text-slate-400">
+          <Clock className="w-3 h-3" />
+          <span>{STATUS_LABEL.queued}</span>
+        </span>
+      );
+  }
+}
+
 export const JobList: React.FC<JobListProps> = ({
   jobs,
   selectedJobId,
@@ -78,8 +123,11 @@ export const JobList: React.FC<JobListProps> = ({
   skillOptions,
   defaultSkillName,
   onChangeJobSkill,
+  exportTasks = [],
+  onCancelExport,
+  onRemoveExport,
 }) => {
-  if (jobs.length === 0) {
+  if (jobs.length === 0 && exportTasks.length === 0) {
     return (
       <div className="h-full flex flex-col items-center justify-center gap-2 px-6 text-center text-slate-500 text-xs">
         <FileVideo className="w-6 h-6 text-slate-600" />
@@ -198,6 +246,83 @@ export const JobList: React.FC<JobListProps> = ({
               <span className="text-slate-500">
                 {job.segments.length} đoạn phụ đề — sẵn sàng xuất
               </span>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Export queue — background renders enqueued from the export modal */}
+      {exportTasks.length > 0 && (
+        <div className="px-2 pt-2 pb-0.5 mt-1 border-t border-slate-800 text-[10px] font-semibold uppercase tracking-wide text-slate-500 shrink-0">
+          Xuất video ({exportTasks.length})
+        </div>
+      )}
+      {exportTasks.map((task) => {
+        const pct = task.total > 0 ? Math.min(100, (task.index / task.total) * 100) : 0;
+        const cancellable = task.status === 'queued' || task.status === 'running';
+        return (
+          <div
+            key={task.id}
+            className="group flex flex-col gap-1 px-3 py-2 rounded-md border bg-slate-800/40 border-slate-700/50 text-[11px]"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <Clapperboard className="w-3.5 h-3.5 shrink-0 text-emerald-500/80" />
+              <span className="truncate font-medium text-slate-300">{task.label}</span>
+              <span className="ml-auto shrink-0">
+                <ExportTaskBadge task={task} />
+              </span>
+              {cancellable ? (
+                <button
+                  onClick={() => onCancelExport?.(task.id)}
+                  className="shrink-0 p-0.5 text-slate-500 hover:text-rose-400 transition"
+                  title="Hủy xuất này"
+                >
+                  <Square className="w-3 h-3" />
+                </button>
+              ) : (
+                <button
+                  onClick={() => onRemoveExport?.(task.id)}
+                  className="shrink-0 p-0.5 text-slate-600 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition"
+                  title="Xóa khỏi danh sách"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+
+            {task.status === 'running' && (
+              <>
+                <div className="w-full h-1 bg-slate-700/70 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-emerald-500 transition-all duration-300"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <span className="text-slate-500 truncate">
+                  {task.stage === 'dubbing' ? 'Đang lồng tiếng' : 'Đang render'}
+                </span>
+              </>
+            )}
+
+            {task.status === 'error' && task.error && (
+              <span className="text-rose-400/80 truncate" title={task.error}>
+                {task.error}
+              </span>
+            )}
+
+            {task.status === 'done' && (
+              <div className="flex items-center gap-1.5 text-emerald-400/90 min-w-0">
+                <span className="truncate font-mono" title={task.outputPath}>
+                  → {fileName(task.outputPath)}
+                </span>
+                <button
+                  onClick={() => onOpenFolder(task.outputPath)}
+                  className="shrink-0 p-0.5 text-slate-500 hover:text-emerald-300 transition"
+                  title="Mở thư mục chứa file"
+                >
+                  <FolderOpen className="w-3 h-3" />
+                </button>
+              </div>
             )}
           </div>
         );

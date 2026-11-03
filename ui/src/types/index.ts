@@ -74,13 +74,13 @@ export interface ExportProgress {
 }
 
 export interface PipelineStageEvent {
-  stage: 'extract_audio' | 'stt' | 'translate' | 'ready';
+  stage: 'extract_audio' | 'stt' | 'translate' | 'ready' | 'dubbing' | 'rendering';
   message: string;
 }
 
 export interface PipelineProgressEvent {
   job_id?: string;
-  stage: 'extract_audio' | 'stt' | 'translate' | 'ready';
+  stage: 'extract_audio' | 'stt' | 'translate' | 'ready' | 'dubbing' | 'rendering';
   message: string;
   percentage: number;
   current_step?: number;
@@ -89,6 +89,23 @@ export interface PipelineProgressEvent {
 }
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled';
+
+/** A queued/running/finished background export — rendered in the job list. */
+export interface ExportTask {
+  /** Same id as request.job_id — used for progress routing and cancel. */
+  id: string;
+  label: string;
+  outputPath: string;
+  request: ExportRequest;
+  status: JobStatus;
+  /** 'dubbing' | 'rendering' — last export-progress stage seen. */
+  stage: string | null;
+  /** Progress cursor: rendered seconds or dubbed segment index. */
+  index: number;
+  /** Total: media duration secs or segment count; 0 = unknown. */
+  total: number;
+  error: string | null;
+}
 
 export interface BatchJob {
   id: string;
