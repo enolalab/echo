@@ -48,7 +48,7 @@ Everything runs **fully offline** if you want it to — whisper.cpp for transcri
 - Original audio is ducked underneath (configurable with `--dub-orig-volume`).
 
 ### 📦 Output Modes
-- **Hardsub** — burn styled subtitles into the picture (with `fast` / `balanced` / `quality` render presets and GPU-assisted decode).
+- **Hardsub** — burn styled subtitles into the picture (with `fast` / `balanced` / `quality` render presets, `--crf` quality control, and GPU-assisted decode). All non-video streams, metadata, and chapters pass through unchanged.
 - **Softsub** — embed subtitle tracks (`mov_text` for MP4, `srt` for MKV) without re-encoding video.
 - **Subs-only** — export `.srt` and `.ass` files without touching the video.
 - **Bilingual** — show original and translated lines simultaneously with distinct typography.
@@ -170,6 +170,7 @@ auto-subtitle --list-skills
 | `--translate-concurrency <N>` | `4` | Max concurrent translation requests |
 | `--no-gpu` | `false` | Force CPU even when CUDA is available |
 | `--render-speed <P>` | `balanced` | `fast`, `balanced`, `quality` (hardsub) |
+| `--crf <N>` | `20` | Video quality target 0–51; lower = better/bigger (hardsub) |
 | `--dub` | `false` | Add a synthesized voice track |
 | `--tts-engine <E>` | `local` | `local` (Piper) or `api` |
 | `--tts-voice <V>` | — | Piper voice id, API voice, or `.onnx` path |

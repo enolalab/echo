@@ -74,10 +74,17 @@ pub struct ExportRequest {
     /// "fast" | "balanced" | "quality" — hardsub re-encode only.
     #[serde(default = "default_render_speed")]
     pub render_speed: String,
+    /// CRF 0-51 — hardsub re-encode only.
+    #[serde(default = "default_crf")]
+    pub crf: u8,
 }
 
 fn default_render_speed() -> String {
     "balanced".into()
+}
+
+fn default_crf() -> u8 {
+    20
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

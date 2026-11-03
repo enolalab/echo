@@ -109,6 +109,10 @@ pub struct Cli {
     #[arg(long, value_parser = ["fast", "balanced", "quality"], default_value = "balanced")]
     pub render_speed: String,
 
+    /// Video re-encode quality target CRF 0-51 (hardsub); lower = better quality, bigger file
+    #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u8).range(0..=51))]
+    pub crf: u8,
+
     /// Max concurrent translation requests (API: 4-8; local Ollama depends on server parallelism)
     #[arg(long, default_value_t = 4)]
     pub translate_concurrency: usize,

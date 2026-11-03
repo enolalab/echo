@@ -495,6 +495,7 @@ pub async fn run(cli: &Cli, deps: Deps<'_>) -> anyhow::Result<Report> {
             let enc = crate::media::EncoderOpts {
                 nvenc: !cli.no_gpu && crate::media::nvenc_available(ffmpeg),
                 speed: crate::media::RenderSpeed::parse(&cli.render_speed),
+                crf: cli.crf,
             };
             let cmd = if let Some((ref dw, has_audio)) = dub_track {
                 crate::media::build_hardsub_dub_command(

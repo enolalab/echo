@@ -775,6 +775,7 @@ pub async fn export_subtitles_core(
     let enc = media::EncoderOpts {
         nvenc: prefer_gpu && media::nvenc_available(&ffmpeg),
         speed: media::RenderSpeed::parse(&request.render_speed),
+        crf: request.crf.min(51),
     };
 
     match request.mode {

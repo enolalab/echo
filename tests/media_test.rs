@@ -41,12 +41,13 @@ fn hardsub_uses_workdir_and_safe_filter() {
         Path::new("My Clip: 1.mp4"),
         &ass,
         Path::new("out.mp4"),
-        EncoderOpts { nvenc: false, speed: RenderSpeed::Balanced },
+        EncoderOpts { nvenc: false, speed: RenderSpeed::Balanced, crf: 20 },
     )
     .unwrap();
     assert_eq!(cmd.get_current_dir(), Some(tmp.path()));
     let a = args(&cmd);
-    assert!(a.windows(2).any(|w| w == ["-vf", "ass=subtitle.ass"]));
+    let fc = a[a.iter().position(|x| x == "-filter_complex").unwrap() + 1].clone();
+    assert!(fc.contains("ass=subtitle.ass"));
     assert!(a
         .iter()
         .any(|x| x.ends_with("My Clip: 1.mp4") && Path::new(x).is_absolute()));
@@ -59,7 +60,7 @@ fn hardsub_rejects_unsafe_ass_name() {
         Path::new("a.mp4"),
         Path::new("/tmp/a b:c.ass"),
         Path::new("o.mp4"),
-        EncoderOpts { nvenc: false, speed: RenderSpeed::Balanced }
+        EncoderOpts { nvenc: false, speed: RenderSpeed::Balanced, crf: 20 }
     )
     .is_err());
 }
@@ -75,7 +76,7 @@ fn softsub_codec_by_container() {
         )
         .unwrap(),
     );
-    assert!(mp4.windows(2).any(|w| w == ["-c:s", "mov_text"]));
+    assert!(mp4.windows(2).any(|w| w == ["-c:s:0", "mov_text"]));
     let mkv = args(
         &build_softsub_command(
             Path::new("ffmpeg"),
@@ -85,7 +86,8 @@ fn softsub_codec_by_container() {
         )
         .unwrap(),
     );
-    assert!(mkv.windows(2).any(|w| w == ["-c:s", "srt"]));
+    assert!(mkv.windows(2).any(|w| w == ["-c:s:0", "srt"]));
+    assert!(mkv.windows(2).any(|w| w == ["-c:s", "copy"]));
     assert!(build_softsub_command(
         Path::new("ffmpeg"),
         Path::new("a.mp4"),

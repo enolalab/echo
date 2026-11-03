@@ -78,11 +78,13 @@ impl RenderSpeed {
     }
 }
 
-/// Encoder selection for re-encode paths: device + speed preset.
+/// Encoder selection for re-encode paths: device + speed preset + quality target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EncoderOpts {
     pub nvenc: bool,
     pub speed: RenderSpeed,
+    /// CRF/CQ quality target (0-51): lower = better quality, larger file.
+    pub crf: u8,
 }
 
 /// Push `-hwaccel cuda` before an input arg (only for the NVENC path):
@@ -101,15 +103,72 @@ fn push_video_encoder(cmd: &mut Command, enc: EncoderOpts) {
             RenderSpeed::Balanced => "p4",
             RenderSpeed::Quality => "p6",
         };
-        cmd.arg("-c:v").arg("h264_nvenc").arg("-preset").arg(preset).arg("-cq").arg("20");
+        cmd.arg("-c:v")
+            .arg("h264_nvenc")
+            .arg("-preset")
+            .arg(preset)
+            .arg("-cq")
+            .arg(enc.crf.to_string());
     } else {
         let preset = match enc.speed {
             RenderSpeed::Fast => "veryfast",
             RenderSpeed::Balanced => "medium",
             RenderSpeed::Quality => "slow",
         };
-        cmd.arg("-c:v").arg("libx264").arg("-preset").arg(preset).arg("-crf").arg("20");
+        cmd.arg("-c:v")
+            .arg("libx264")
+            .arg("-preset")
+            .arg(preset)
+            .arg("-crf")
+            .arg(enc.crf.to_string());
     }
+}
+
+fn output_ext(path: &Path) -> String {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+/// Codec for a newly injected srt track by container: mp4-family needs mov_text.
+fn new_sub_codec(output: &Path) -> anyhow::Result<&'static str> {
+    let ext = output_ext(output);
+    match ext.as_str() {
+        "mp4" | "m4v" | "mov" => Ok("mov_text"),
+        "mkv" => Ok("srt"),
+        _ => anyhow::bail!("unsupported output container format: .{ext}"),
+    }
+}
+
+/// Codec for passthrough of the input's own subtitle tracks: mp4-family only
+/// accepts mov_text (transcodes srt/ass); elsewhere copy keeps the original codec.
+fn passthrough_sub_codec(output: &Path) -> &'static str {
+    match output_ext(output).as_str() {
+        "mp4" | "m4v" | "mov" => "mov_text",
+        _ => "copy",
+    }
+}
+
+/// Map input 0's non-video streams through + global metadata/chapters.
+/// The caller maps the (filtered or copied) video and audio itself.
+fn push_passthrough_streams(cmd: &mut Command, output: &Path) {
+    cmd.arg("-map")
+        .arg("0:s?")
+        .arg("-map")
+        .arg("0:d?")
+        .arg("-map")
+        .arg("0:t?")
+        .arg("-map_metadata")
+        .arg("0")
+        .arg("-map_chapters")
+        .arg("0")
+        .arg("-c:d")
+        .arg("copy")
+        .arg("-c:t")
+        .arg("copy")
+        .arg("-c:s")
+        .arg(passthrough_sub_codec(output));
 }
 
 pub fn build_hardsub_command(
@@ -147,14 +206,17 @@ pub fn build_hardsub_command(
     push_hwaccel(&mut cmd, enc);
     cmd.arg("-i")
         .arg(&abs_video)
+        .arg("-filter_complex")
+        .arg(format!("[0:v]ass={file_name}[v]"))
         .arg("-map")
-        .arg("0:v:0")
+        .arg("[v]")
         .arg("-map")
         .arg("0:a?")
-        .arg("-vf")
-        .arg(format!("ass={file_name}"));
+        .arg("-c:a")
+        .arg("copy");
+    push_passthrough_streams(&mut cmd, &abs_output);
     push_video_encoder(&mut cmd, enc);
-    cmd.arg("-c:a").arg("copy").arg(&abs_output);
+    cmd.arg(&abs_output);
     Ok(cmd)
 }
 
@@ -219,6 +281,7 @@ pub fn build_hardsub_dub_command(
     } else {
         cmd.arg("-map").arg("1:a");
     }
+    push_passthrough_streams(&mut cmd, &abs_output);
     push_video_encoder(&mut cmd, enc);
     cmd.arg("-c:a").arg("aac").arg(&abs_output);
     Ok(cmd)
@@ -235,16 +298,7 @@ pub fn build_softsub_dub_command(
     orig_volume: f32,
     has_audio: bool,
 ) -> anyhow::Result<Command> {
-    let ext = output
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|s| s.to_ascii_lowercase())
-        .context("output path has no extension")?;
-    let codec = match ext.as_str() {
-        "mp4" | "m4v" | "mov" => "mov_text",
-        "mkv" => "srt",
-        _ => anyhow::bail!("unsupported output container format: .{ext}"),
-    };
+    let codec = new_sub_codec(output)?;
 
     let mut cmd = Command::new(ffmpeg);
     cmd.arg("-hide_banner")
@@ -262,19 +316,20 @@ pub fn build_softsub_dub_command(
             "[0:a]volume={orig_volume}[a0];[2:a]apad[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0[aout]"
         ));
     }
-    cmd.arg("-map").arg("0:v");
+    // New sub track mapped first so `-c:s:0` targets it; the input's own
+    // streams pass through unchanged.
+    cmd.arg("-map").arg("1:0").arg("-map").arg("0:v");
     if has_audio {
         cmd.arg("-map").arg("[aout]");
     } else {
         cmd.arg("-map").arg("2:a");
     }
-    cmd.arg("-map")
-        .arg("1:0")
-        .arg("-c:v")
+    push_passthrough_streams(&mut cmd, output);
+    cmd.arg("-c:v")
         .arg("copy")
         .arg("-c:a")
         .arg("aac")
-        .arg("-c:s")
+        .arg("-c:s:0")
         .arg(codec)
         .arg(output);
     Ok(cmd)
@@ -287,17 +342,7 @@ pub fn build_softsub_command(
     srt_path: &Path,
     output: &Path,
 ) -> anyhow::Result<Command> {
-    let ext = output
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|s| s.to_ascii_lowercase())
-        .context("output path has no extension")?;
-
-    let codec = match ext.as_str() {
-        "mp4" | "m4v" | "mov" => "mov_text",
-        "mkv" => "srt",
-        _ => anyhow::bail!("unsupported output container format: .{ext}"),
-    };
+    let codec = new_sub_codec(output)?;
 
     let mut cmd = Command::new(ffmpeg);
     cmd.arg("-hide_banner")
@@ -308,17 +353,20 @@ pub fn build_softsub_command(
         .arg(video)
         .arg("-i")
         .arg(srt_path)
-        .arg("-map")
-        .arg("0:v")
-        .arg("-map")
-        .arg("0:a?")
+        // New sub first (→ s:0); every original stream of input 0 is copied.
         .arg("-map")
         .arg("1:0")
-        .arg("-c:v")
-        .arg("copy")
-        .arg("-c:a")
+        .arg("-map")
+        .arg("0")
+        .arg("-map_metadata")
+        .arg("0")
+        .arg("-map_chapters")
+        .arg("0")
+        .arg("-c")
         .arg("copy")
         .arg("-c:s")
+        .arg(passthrough_sub_codec(output))
+        .arg("-c:s:0")
         .arg(codec)
         .arg(output);
     Ok(cmd)
@@ -405,7 +453,7 @@ mod tests {
             Path::new("/o.mp4"),
             0.15,
             true,
-            EncoderOpts { nvenc: false, speed: RenderSpeed::Balanced },
+            EncoderOpts { nvenc: false, speed: RenderSpeed::Balanced, crf: 20 },
         )
         .unwrap();
         let args: Vec<String> = cmd
@@ -435,8 +483,8 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().into())
             .collect();
-        let cs = args.iter().position(|a| a == "-c:s").unwrap();
-        assert_eq!(args[cs + 1], "srt"); // .mkv → srt codec
+        let cs = args.iter().position(|a| a == "-c:s:0").unwrap();
+        assert_eq!(args[cs + 1], "srt"); // .mkv → srt codec for injected track
         let fc = args[args.iter().position(|a| a == "-filter_complex").unwrap() + 1].clone();
         assert!(fc.contains("[2:a]apad"));
     }
