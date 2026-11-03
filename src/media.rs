@@ -361,8 +361,11 @@ pub fn build_hardsub_dub_command(
         format!("[0:v]ass={file_name}[v]")
     };
     let graph = if has_audio {
+        // duration=first bounds the mix to the original audio (≈ video length).
+        // An `apad`-style infinite input with duration=longest would make the
+        // encode run forever, growing the file with silence past the end.
         format!(
-            "{vgraph};[0:a]volume={orig_volume}[a0];[1:a]apad[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0[aout]"
+            "{vgraph};[0:a]volume={orig_volume}[a0];[a0][1:a]amix=inputs=2:duration=first:normalize=0[aout]"
         )
     } else {
         vgraph
@@ -395,7 +398,7 @@ pub fn build_hardsub_dub_command(
     }
     push_passthrough_streams(&mut cmd, &abs_output);
     push_video_encoder(&mut cmd, enc);
-    cmd.arg("-c:a").arg("aac").arg(&abs_output);
+    cmd.arg("-c:a").arg("aac").arg("-shortest").arg(&abs_output);
     Ok(cmd)
 }
 
@@ -427,7 +430,7 @@ pub fn build_softsub_dub_command(
         .arg(dub_wav);
     if has_audio {
         cmd.arg("-filter_complex").arg(format!(
-            "[0:a]volume={orig_volume}[a0];[2:a]apad[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0[aout]"
+            "[0:a]volume={orig_volume}[a0];[a0][2:a]amix=inputs=2:duration=first:normalize=0[aout]"
         ));
     }
     // New sub track mapped first so `-c:s:0` targets it; the input's own
@@ -445,6 +448,7 @@ pub fn build_softsub_dub_command(
         .arg("aac")
         .arg("-c:s:0")
         .arg(codec)
+        .arg("-shortest")
         .arg(output);
     Ok(cmd)
 }
@@ -767,7 +771,8 @@ mod tests {
         let cs = args.iter().position(|a| a == "-c:s:0").unwrap();
         assert_eq!(args[cs + 1], "srt"); // .mkv → srt codec for injected track
         let fc = args[args.iter().position(|a| a == "-filter_complex").unwrap() + 1].clone();
-        assert!(fc.contains("[2:a]apad"));
+        assert!(fc.contains("[a0][2:a]amix"));
+        assert!(fc.contains("duration=first"), "amix must not run forever");
     }
 
     #[test]
