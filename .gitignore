@@ -4,6 +4,8 @@
 /ui/node_modules
 /node_modules
 /.superpowers
+/.openidea
+/skills
 
 # Test media artifacts
 *.mp4

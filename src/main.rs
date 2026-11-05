@@ -129,15 +129,22 @@ async fn build_tts_engine(
             Ok(Box::new(PiperTts::new(piper, model, cfg)))
         }
         TtsEngine::Api => {
-            let stored = store.and_then(|s| s.stt_key().ok().flatten());
-            let key = cli
-                .api_key
+            let base = cli
+                .tts_base_url
                 .clone()
-                .or(stored)
-                .context("--api-key or OPENAI_API_KEY required for --tts-engine api")?;
+                .unwrap_or_else(|| cli.api_base_url_or_default());
+            let is_local = base.contains("localhost")
+                || base.contains("127.0.0.1")
+                || base.contains("0.0.0.0");
+            let stored = store.and_then(|s| s.stt_key().ok().flatten());
+            let key = cli.api_key.clone().or(stored);
+            if !is_local && key.is_none() {
+                anyhow::bail!("--api-key or OPENAI_API_KEY required for --tts-engine api");
+            }
+            let key = key.unwrap_or_else(|| "no-key-required".to_string());
             let voice = cli.tts_voice.clone().unwrap_or_else(|| "alloy".to_string());
             Ok(Box::new(ApiTts::new(
-                cli.api_base_url_or_default(),
+                base,
                 key,
                 cli.tts_model.clone(),
                 voice,

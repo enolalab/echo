@@ -14,6 +14,12 @@ pub struct WhisperModelInfo {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SystemInfo {
     pub has_cuda: bool,
+    #[serde(default)]
+    pub cuda_ready: bool,
+    #[serde(default)]
+    pub cuda_error: Option<String>,
+    #[serde(default)]
+    pub ffmpeg_ready: bool,
     pub ollama_running: bool,
     pub ollama_models: Vec<String>,
     pub whisper_models: Vec<WhisperModelInfo>,
@@ -161,6 +167,9 @@ mod tests {
     fn test_system_info_serialization() {
         let info = SystemInfo {
             has_cuda: false,
+            cuda_ready: false,
+            cuda_error: None,
+            ffmpeg_ready: true,
             ollama_running: true,
             ollama_models: vec!["qwen2.5:7b".to_string()],
             whisper_models: vec![WhisperModelInfo {

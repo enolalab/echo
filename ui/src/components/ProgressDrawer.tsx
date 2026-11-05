@@ -12,6 +12,9 @@ interface ProgressDrawerProps {
   /** Chain straight into export after translate — toggles general.auto_export. */
   autoExport?: boolean;
   onToggleAutoExport?: () => void;
+  /** Pad a black bar below the video so subs don't cover it — general.pad_subs. */
+  padSubs?: boolean;
+  onTogglePadSubs?: () => void;
   onOpenExport: () => void;
   canExport: boolean;
 }
@@ -44,6 +47,8 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
   exportRunning = false,
   autoExport = false,
   onToggleAutoExport,
+  padSubs = false,
+  onTogglePadSubs,
   onOpenExport,
   canExport,
 }) => {
@@ -167,6 +172,20 @@ export const ProgressDrawer: React.FC<ProgressDrawerProps> = ({
             />
             Tự xuất
           </label>
+          {autoExport && (
+            <label
+              className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none pr-1"
+              title="Sub nằm trong thanh đen dưới video, không che hình gốc"
+            >
+              <input
+                type="checkbox"
+                checked={padSubs}
+                onChange={onTogglePadSubs}
+                className="accent-emerald-500"
+              />
+              Không che hình
+            </label>
+          )}
           <button
             onClick={() => setShowLogs(!showLogs)}
             className="flex items-center gap-1.5 h-8 text-slate-400 hover:text-slate-200 hover:bg-slate-800 px-2.5 rounded-md border border-slate-700 transition"

@@ -13,6 +13,7 @@ import { ExportModal } from './components/ExportModal';
 import { JobList } from './components/JobList';
 import { SettingsModal } from './components/SettingsModal';
 import { YoutubeImportModal } from './components/YoutubeImportModal';
+import { RunConfigModal, type RunConfigPayload } from './components/RunConfigModal';
 import { useSystemInfo } from './hooks/useSystemInfo';
 import {
   startPipeline,
@@ -59,18 +60,26 @@ export default function App() {
     tts_engine: 'local',
     tts_voice: null,
     tts_model: null,
+    tts_base_url: null,
     dub_orig_volume: 0.15,
     render_speed: 'balanced',
     translate_concurrency: 4,
     auto_export: true,
+    pad_subs: false,
   });
+  const generalRef = useRef<GeneralSettings>(general);
+  generalRef.current = general;
+
   const [settingsView, setSettingsView] = useState<SettingsView | null>(null);
   const settingsRef = useRef<SettingsView | null>(null);
   settingsRef.current = settingsView;
   const { toasts, pushToast, dismissToast } = useToasts();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const lastSavedGeneral = useRef<string | null>(null);
-  const patchGeneral = (patch: Partial<GeneralSettings>) => setGeneral((g) => ({ ...g, ...patch }));
+  const patchGeneral = (patch: Partial<GeneralSettings>) => {
+    generalRef.current = { ...generalRef.current, ...patch };
+    setGeneral((g) => ({ ...g, ...patch }));
+  };
   const { whisper_model: whisperModel, target_lang: targetLang, bilingual, style_preset: stylePreset } = general;
 
   // Batch jobs state
@@ -88,6 +97,7 @@ export default function App() {
   const [logs, setLogs] = useState<string[]>([]);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isYoutubeModalOpen, setIsYoutubeModalOpen] = useState(false);
+  const [isRunConfigOpen, setIsRunConfigOpen] = useState(false);
   const [outputDir, setOutputDir] = useState<string>('');
   const [pendingAdd, setPendingAdd] = useState<{ paths: string[]; dupes: string[] } | null>(null);
 
@@ -133,6 +143,7 @@ export default function App() {
     getSettings()
       .then((s) => {
         lastSavedGeneral.current = JSON.stringify(s.general);
+        generalRef.current = s.general;
         setGeneral(s.general);
         setSettingsView(s);
         if (s.load_warning) {
@@ -230,13 +241,12 @@ export default function App() {
     listen<ExportProgress>('export-progress', (e) => {
       const p = e.payload;
       if (!p.job_id) return;
-      setExportTasks((prev) =>
-        prev.map((t) =>
-          t.id === p.job_id || t.request.job_id === p.job_id
-            ? { ...t, stage: p.stage, index: p.index, total: p.total }
-            : t
-        )
+      exportTasksRef.current = exportTasksRef.current.map((t) =>
+        t.id === p.job_id || t.request.job_id === p.job_id
+          ? { ...t, stage: p.stage, index: p.index, total: p.total }
+          : t
       );
+      setExportTasks(exportTasksRef.current);
       setJobs((prev) => {
         if (!prev.some((j) => j.id === p.job_id)) return prev;
         const pct = p.total > 0 ? Math.min(100, (p.index / p.total) * 100) : 5;
@@ -376,6 +386,7 @@ export default function App() {
   const runJob = async (job: BatchJob) => {
     const current = jobsRef.current.find((j) => j.id === job.id) ?? job;
     const { skill_id, label } = jobSkillChoice(current, settingsRef.current);
+    const cfg = generalRef.current;
     updateJob(job.id, {
       status: 'running',
       skillUsed: label,
@@ -393,18 +404,18 @@ export default function App() {
       const result = await startPipeline({
         job_id: job.id,
         video_path: job.videoPath,
-        whisper_model: whisperModel,
-        use_cloud_stt: general.use_cloud_stt,
-        target_lang: targetLang,
+        whisper_model: cfg.whisper_model,
+        use_cloud_stt: cfg.use_cloud_stt,
+        target_lang: cfg.target_lang,
         skip_translate: false,
-        prefer_gpu: general.prefer_gpu,
+        prefer_gpu: cfg.prefer_gpu,
         profile_id: settingsRef.current?.default_profile_id ?? null,
         skill_id,
       });
 
       // Chain straight into a hardsub export — the job stays 'running'
       // through the render so the whole chain reads as one process.
-      if (!general.auto_export || result.length === 0) {
+      if (!cfg.auto_export || result.length === 0) {
         updateJob(job.id, { status: 'done', segments: result });
         pushToast(`Hoàn tất ${job.videoPath.split(/[/\\]/).pop()}`, 'success');
         return;
@@ -419,21 +430,22 @@ export default function App() {
         video_path: job.videoPath,
         output_path: outPath,
         mode: 'hardsub',
-        bilingual,
-        style_preset: stylePreset,
+        bilingual: cfg.bilingual,
+        style_preset: cfg.style_preset,
         segments: result,
-        dub: general.dub_enabled
+        dub: cfg.dub_enabled
           ? {
               enabled: true,
-              engine: general.tts_engine,
-              voice: general.tts_voice ?? null,
-              model: general.tts_model ?? null,
-              original_volume: general.dub_orig_volume,
+              engine: cfg.tts_engine,
+              voice: cfg.tts_voice ?? null,
+              model: cfg.tts_model ?? null,
+              base_url: cfg.tts_base_url ?? null,
+              original_volume: cfg.dub_orig_volume,
             }
           : null,
         job_id: job.id,
-        render_speed: general.render_speed,
-        pad_subs: null,
+        render_speed: cfg.render_speed,
+        pad_subs: cfg.pad_subs ? 0 : null,
       };
 
       updateJob(job.id, {
@@ -446,20 +458,19 @@ export default function App() {
           elapsed_secs: 0,
         },
       });
-      setExportTasks((prev) => [
-        ...prev,
-        {
-          id: taskId,
-          label: name,
-          outputPath: outPath,
-          request,
-          status: 'queued' as const,
-          stage: null,
-          index: 0,
-          total: 0,
-          error: null,
-        },
-      ]);
+      const exportTask: ExportTask = {
+        id: taskId,
+        label: name,
+        outputPath: outPath,
+        request,
+        status: 'queued' as const,
+        stage: null,
+        index: 0,
+        total: 0,
+        error: null,
+      };
+      exportTasksRef.current = [...exportTasksRef.current, exportTask];
+      setExportTasks(exportTasksRef.current);
       setLogs((prev) => [...prev, `[XUẤT] Tự động xuất: ${stem}_subtitled.mp4`]);
 
       // Register the waiter before pumping so a fast-failing export can't
@@ -519,6 +530,36 @@ export default function App() {
     }
   };
 
+  // Open config modal before running
+  const queuedJobs = useMemo(
+    () => jobs.filter((j) => j.status === 'queued' || j.status === 'error' || j.status === 'cancelled'),
+    [jobs]
+  );
+
+  const handleOpenRunConfig = () => {
+    if (queuedJobs.length === 0 && !videoPath) {
+      pushToast('Hãy chọn video trước khi bắt đầu', 'info');
+      return;
+    }
+    setIsRunConfigOpen(true);
+  };
+
+  const handleConfirmRunConfig = async (payload: RunConfigPayload) => {
+    setIsRunConfigOpen(false);
+
+    // Apply configuration immediately
+    patchGeneral(payload.generalPatch);
+    if (payload.profileId && payload.profileId !== settingsRef.current?.default_profile_id) {
+      await handleSelectProfile(payload.profileId);
+    }
+    if (payload.skillId !== (settingsRef.current?.default_skill_id ?? null)) {
+      await handleSelectSkill(payload.skillId);
+    }
+
+    // Run the pipeline
+    await handleStart();
+  };
+
   // Cancel the running job AND mark every pending item cancelled
   const cancelQueue = async (id?: string) => {
     stopQueueRef.current = true;
@@ -559,7 +600,10 @@ export default function App() {
   // ffmpeg renders. Tasks show in the job list and drive the progress drawer.
 
   const updateExportTask = useCallback((id: string, patch: Partial<ExportTask>) => {
-    setExportTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+    exportTasksRef.current = exportTasksRef.current.map((t) =>
+      t.id === id ? { ...t, ...patch } : t
+    );
+    setExportTasks(exportTasksRef.current);
   }, []);
 
   // Sequential pump — one ffmpeg encode at a time. Safe to call repeatedly;
@@ -600,6 +644,13 @@ export default function App() {
     }
   }, [pushToast, updateExportTask, updateJob]);
 
+  // Safety net: whenever exportTasks updates, if there's any queued task and pump is idle, run pump
+  useEffect(() => {
+    if (exportTasks.some((t) => t.status === 'queued') && !exportPumpRef.current) {
+      void pumpExportQueue();
+    }
+  }, [exportTasks, pumpExportQueue]);
+
   // Modal hands us fully-built requests; we queue them and run in background.
   const handleStartExports = useCallback(
     (requests: ExportRequest[]) => {
@@ -614,7 +665,8 @@ export default function App() {
         total: 0,
         error: null,
       }));
-      setExportTasks((prev) => [...prev, ...tasks]);
+      exportTasksRef.current = [...exportTasksRef.current, ...tasks];
+      setExportTasks(exportTasksRef.current);
       setLogs((prev) => [...prev, `[XUẤT] Đã thêm ${tasks.length} file vào hàng đợi xuất`]);
       pushToast(
         tasks.length > 1
@@ -634,9 +686,10 @@ export default function App() {
     void cancelPipeline(task?.request.job_id ?? id).catch((err) =>
       console.error('Cancel export failed:', err)
     );
-    setExportTasks((prev) =>
-      prev.map((t) => (t.id === id && t.status === 'queued' ? { ...t, status: 'cancelled' } : t))
+    exportTasksRef.current = exportTasksRef.current.map((t) =>
+      t.id === id && t.status === 'queued' ? { ...t, status: 'cancelled' } : t
     );
+    setExportTasks(exportTasksRef.current);
     // Unblock any runJob waiting on this task.
     exportWaitersRef.current.get(id)?.({ ok: false, err: 'Đã hủy' });
     exportWaitersRef.current.delete(id);
@@ -645,7 +698,8 @@ export default function App() {
   const handleRemoveExport = useCallback((id: string) => {
     exportWaitersRef.current.get(id)?.({ ok: false, err: 'Đã xóa khỏi hàng đợi' });
     exportWaitersRef.current.delete(id);
-    setExportTasks((prev) => prev.filter((t) => t.id !== id));
+    exportTasksRef.current = exportTasksRef.current.filter((t) => t.id !== id);
+    setExportTasks(exportTasksRef.current);
   }, []);
 
   // Subtitle editor operations — applied to the selected job
@@ -811,7 +865,7 @@ export default function App() {
         stylePreset={stylePreset}
         onSelectPreset={(p) => patchGeneral({ style_preset: p })}
         isRunning={isRunning}
-        onStart={handleStart}
+        onStart={handleOpenRunConfig}
         onCancel={handleCancel}
         systemInfo={systemInfo}
         preferGpu={general.prefer_gpu}
@@ -890,6 +944,10 @@ export default function App() {
         logs={logs}
         isRunning={isRunning}
         exportRunning={runningExport !== null}
+        autoExport={general.auto_export}
+        onToggleAutoExport={() => patchGeneral({ auto_export: !general.auto_export })}
+        padSubs={general.pad_subs}
+        onTogglePadSubs={() => patchGeneral({ pad_subs: !general.pad_subs })}
         onOpenExport={() => setIsExportOpen(true)}
         canExport={segments.length > 0}
       />
@@ -904,12 +962,14 @@ export default function App() {
         initialPreset={stylePreset}
         initialBilingual={bilingual}
         initialRenderSpeed={general.render_speed}
+        initialPadSubs={general.pad_subs}
         dubDefaults={
           general.dub_enabled
             ? {
                 engine: general.tts_engine,
                 voice: general.tts_voice,
                 model: general.tts_model,
+                base_url: general.tts_base_url,
                 original_volume: general.dub_orig_volume,
               }
             : undefined
@@ -918,6 +978,24 @@ export default function App() {
           .filter((j) => j.status === 'done' && j.segments.length > 0)
           .map((j) => ({ videoPath: j.videoPath, segments: j.segments }))}
         onStartExport={handleStartExports}
+      />
+
+      {/* 4.5. Run Configuration Modal */}
+      <RunConfigModal
+        isOpen={isRunConfigOpen}
+        onClose={() => setIsRunConfigOpen(false)}
+        onConfirm={handleConfirmRunConfig}
+        queuedJobs={queuedJobs}
+        currentVideoPath={videoPath}
+        general={general}
+        systemInfo={systemInfo}
+        profiles={settingsView?.profiles ?? []}
+        defaultProfileId={settingsView?.default_profile_id ?? null}
+        presets={settingsView?.presets ?? []}
+        userSkills={settingsView?.skills ?? []}
+        defaultSkillId={settingsView?.default_skill_id ?? null}
+        onDownloadModel={downloadModel}
+        downloadingModel={downloadingModel}
       />
 
       {/* 5. YouTube Import Modal (kept mounted so background downloads still queue) */}

@@ -14,6 +14,9 @@ export interface WhisperModelInfo {
 
 export interface SystemInfo {
   has_cuda: boolean;
+  cuda_ready?: boolean;
+  cuda_error?: string | null;
+  ffmpeg_ready?: boolean;
   ollama_running: boolean;
   ollama_models: string[];
   whisper_models: WhisperModelInfo[];
@@ -41,6 +44,7 @@ export interface DubOptions {
   engine: TtsEngineKind;
   voice?: string | null;
   model?: string | null;
+  base_url?: string | null;
   original_volume: number;
 }
 
@@ -151,12 +155,15 @@ export interface GeneralSettings {
   tts_engine: TtsEngineKind;
   tts_voice?: string | null;
   tts_model?: string | null;
+  tts_base_url?: string | null;
   dub_orig_volume: number;
   render_speed: RenderSpeed;
   /** Max concurrent LLM translation requests (1 = sequential). */
   translate_concurrency: number;
   /** Chain straight into a hardsub export after translate finishes. */
   auto_export: boolean;
+  /** Hardsub: subtitles in a padded bar below the video, not over the picture. */
+  pad_subs: boolean;
 }
 
 export interface SettingsView {

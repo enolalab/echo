@@ -15,10 +15,12 @@ const general: GeneralSettings = {
   tts_engine: 'local',
   tts_voice: null,
   tts_model: null,
+  tts_base_url: null,
   dub_orig_volume: 0.15,
   render_speed: 'balanced',
   translate_concurrency: 4,
       auto_export: true,
+      pad_subs: false,
 };
 
 const view = (over: Partial<SettingsView> = {}): SettingsView => ({

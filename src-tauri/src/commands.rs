@@ -65,11 +65,34 @@ fn get_app_config() -> AppConfig {
 
 #[tauri::command]
 pub async fn get_system_info() -> Result<SystemInfo, String> {
-    let has_cuda = std::process::Command::new("which")
-        .arg("nvcc")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+    let (has_cuda, cuda_ready, cuda_error) = {
+        let has_nvcc = std::process::Command::new("which")
+            .arg("nvcc")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        match std::process::Command::new("nvidia-smi").output() {
+            Ok(o) if o.status.success() => (true, true, None),
+            Ok(o) => {
+                let err_text = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                let msg = if err_text.contains("communicate") || err_text.contains("driver") {
+                    "Driver NVIDIA không kết nối được (đang dùng CPU)".to_string()
+                } else if !err_text.is_empty() {
+                    err_text
+                } else {
+                    "NVIDIA GPU không sẵn sàng (đang dùng CPU)".to_string()
+                };
+                (true, false, Some(msg))
+            }
+            Err(_) if has_nvcc => (
+                true,
+                false,
+                Some("Không tìm thấy công cụ nvidia-smi".to_string()),
+            ),
+            Err(_) => (false, false, None),
+        }
+    };
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(1500))
@@ -103,7 +126,7 @@ pub async fn get_system_info() -> Result<SystemInfo, String> {
         };
 
     let config = get_app_config();
-    let dm = DependencyManager::new(config);
+    let dm = DependencyManager::new(config.clone());
     let mut whisper_models = Vec::new();
     let sizes = [
         ("tiny", 75),
@@ -137,8 +160,18 @@ pub async fn get_system_info() -> Result<SystemInfo, String> {
         });
     }
 
+    let ffmpeg_ready = std::process::Command::new("which")
+        .arg("ffmpeg")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+        || config.bin_dir.join("ffmpeg").is_file();
+
     Ok(SystemInfo {
         has_cuda,
+        cuda_ready,
+        cuda_error,
+        ffmpeg_ready,
         ollama_running,
         ollama_models,
         whisper_models,
@@ -148,7 +181,7 @@ pub async fn get_system_info() -> Result<SystemInfo, String> {
 #[tauri::command]
 pub async fn download_whisper_model(app: AppHandle, model_name: String) -> Result<(), String> {
     let config = get_app_config();
-    let dm = DependencyManager::new(config);
+    let dm = DependencyManager::new(config.clone());
     let _ = app.emit(
         "pipeline-log",
         format!("Bắt đầu tải model Whisper '{model_name}'..."),
@@ -739,13 +772,33 @@ async fn build_export_tts(
             Ok(Box::new(PiperTts::new(piper, model, cfg)))
         }
         TtsEngineKind::Api => {
-            let key = {
+            let (base_url, key) = {
                 let store = state.settings.lock().map_err(|_| "Lỗi khóa cài đặt")?;
-                store.stt_key().ok().flatten()
-            }
-            .ok_or("Chưa nhập API key cho TTS".to_string())?;
+                let general = &store.settings().general;
+                let base = dub
+                    .base_url
+                    .as_deref()
+                    .or(general.tts_base_url.as_deref())
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("https://api.openai.com/v1");
+                let is_local = base.contains("localhost")
+                    || base.contains("127.0.0.1")
+                    || base.contains("0.0.0.0");
+                let key = store.stt_key().ok().flatten();
+                if !is_local && key.is_none() {
+                    return Err(
+                        "Chưa nhập API key cho TTS (khi dùng cloud OpenAI). Nếu dùng local TTS (VieNeu-TTS / LocalAI), hãy điền URL localhost."
+                            .to_string(),
+                    );
+                }
+                (
+                    base.to_string(),
+                    key.unwrap_or_else(|| "no-key-required".to_string()),
+                )
+            };
             Ok(Box::new(ApiTts::new(
-                "https://api.openai.com/v1".to_string(),
+                base_url,
                 key,
                 dub.model.clone().unwrap_or_else(|| "tts-1".into()),
                 dub.voice.clone().unwrap_or_else(|| "alloy".into()),

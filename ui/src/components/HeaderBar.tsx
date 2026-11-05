@@ -16,9 +16,11 @@ import {
   ChevronDown,
   Clapperboard,
   Youtube,
+  AlertTriangle,
 } from 'lucide-react';
 import type { SystemInfo, StylePreset, ProfileView, Skill } from '../types';
 import { KIND_ICONS } from '../lib/providers';
+import { SystemStatusIndicator } from './SystemStatusIndicator';
 
 interface HeaderBarProps {
   videoPath: string;
@@ -201,6 +203,17 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
 
         <div className="flex-1" />
 
+        <SystemStatusIndicator
+          systemInfo={systemInfo}
+          whisperModel={whisperModel}
+          profiles={profiles}
+          defaultProfileId={defaultProfileId}
+          preferGpu={preferGpu}
+          onOpenSettings={onOpenSettings}
+          onDownloadModel={onDownloadModel}
+          downloadingModel={downloadingModel}
+        />
+
         {systemInfo?.has_cuda ? (
           <button
             type="button"
@@ -208,17 +221,31 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             aria-label="Chuyển chế độ CPU/GPU"
             className={`flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium border shrink-0 whitespace-nowrap transition ${
               preferGpu
-                ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/50 hover:bg-emerald-900/50'
+                ? systemInfo?.cuda_ready === false
+                  ? 'bg-amber-950/50 text-amber-300 border-amber-700/60 hover:bg-amber-900/50'
+                  : 'bg-emerald-950/40 text-emerald-400 border-emerald-800/50 hover:bg-emerald-900/50'
                 : 'bg-slate-800/60 text-slate-400 border-slate-700 hover:bg-slate-700/60'
             }`}
             title={
               preferGpu
-                ? 'Whisper ưu tiên GPU (CUDA) — bấm để chuyển sang CPU'
+                ? systemInfo?.cuda_ready === false
+                  ? `GPU cảnh báo: ${systemInfo?.cuda_error || 'Driver lỗi'} (đang dùng CPU fallback) — bấm để chuyển hẳn sang CPU`
+                  : 'Whisper ưu tiên GPU (CUDA) — bấm để chuyển sang CPU'
                 : 'Whisper chỉ dùng CPU — bấm để bật GPU'
             }
           >
-            {preferGpu ? <Zap className="w-3 h-3" /> : <Cpu className="w-3 h-3" />}
-            <span>{preferGpu ? 'CUDA GPU' : 'CPU'}</span>
+            {preferGpu ? (
+              systemInfo?.cuda_ready === false ? <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" /> : <Zap className="w-3 h-3" />
+            ) : (
+              <Cpu className="w-3 h-3" />
+            )}
+            <span>
+              {preferGpu
+                ? systemInfo?.cuda_ready === false
+                  ? 'CUDA (Lỗi driver)'
+                  : 'CUDA GPU'
+                : 'CPU'}
+            </span>
           </button>
         ) : (
           <div

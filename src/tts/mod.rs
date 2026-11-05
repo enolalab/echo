@@ -23,6 +23,8 @@ pub struct DubOptions {
     pub voice: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
     #[serde(default = "default_orig_volume")]
     pub orig_volume: f32,
 }
@@ -38,6 +40,7 @@ impl Default for DubOptions {
             engine: TtsEngineKind::Local,
             voice: None,
             model: None,
+            base_url: None,
             orig_volume: default_orig_volume(),
         }
     }

@@ -66,7 +66,7 @@ describe('settings IPC', () => {
   it('calls get_settings and save_general', async () => {
     await getSettings();
     expect(invoke).toHaveBeenCalledWith('get_settings');
-    const general = { whisper_model: 'base', target_lang: 'vi', bilingual: true, style_preset: 'youtube_yellow' as const, use_cloud_stt: false, prefer_gpu: true, dub_enabled: false, tts_engine: 'local' as const, dub_orig_volume: 0.15, render_speed: 'balanced' as const, translate_concurrency: 4, auto_export: true };
+    const general = { whisper_model: 'base', target_lang: 'vi', bilingual: true, style_preset: 'youtube_yellow' as const, use_cloud_stt: false, prefer_gpu: true, dub_enabled: false, tts_engine: 'local' as const, tts_base_url: null, dub_orig_volume: 0.15, render_speed: 'balanced' as const, translate_concurrency: 4, auto_export: true, pad_subs: false };
     await saveGeneral(general);
     expect(invoke).toHaveBeenCalledWith('save_general', { general });
   });

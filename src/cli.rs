@@ -136,6 +136,10 @@ pub struct Cli {
     #[arg(long, default_value = "tts-1")]
     pub tts_model: String,
 
+    /// Base URL for API TTS (default: https://api.openai.com/v1; or e.g. http://localhost:8000/v1 for local VieNeu-TTS)
+    #[arg(long)]
+    pub tts_base_url: Option<String>,
+
     /// Original audio volume under the dub (0.0-1.0)
     #[arg(long, default_value = "0.15")]
     pub dub_orig_volume: f32,

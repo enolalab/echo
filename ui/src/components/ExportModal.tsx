@@ -30,6 +30,7 @@ interface ExportModalProps {
   initialPreset: StylePreset;
   initialBilingual: boolean;
   initialRenderSpeed?: RenderSpeed;
+  initialPadSubs?: boolean;
   dubDefaults?: Omit<DubOptions, 'enabled'>;
   /** Other finished jobs eligible for batch export (deduped vs current video). */
   batchItems?: { videoPath: string; segments: SubtitleSegment[] }[];
@@ -79,6 +80,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   initialPreset,
   initialBilingual,
   initialRenderSpeed,
+  initialPadSubs,
   dubDefaults,
   batchItems,
   onStartExport,
@@ -88,7 +90,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [stylePreset, setStylePreset] = useState<StylePreset>(initialPreset);
   const [bilingual, setBilingual] = useState(initialBilingual);
   const [renderSpeed, setRenderSpeed] = useState<RenderSpeed>(initialRenderSpeed ?? 'balanced');
-  const [padSubs, setPadSubs] = useState(false);
+  const [padSubs, setPadSubs] = useState(!!initialPadSubs);
   const [dubEnabled, setDubEnabled] = useState(!!dubDefaults);
   const [batchMode, setBatchMode] = useState(false);
 
@@ -97,9 +99,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       setOutputPath(defaultOutputPath);
       setDubEnabled(!!dubDefaults);
       setRenderSpeed(initialRenderSpeed ?? 'balanced');
+      setPadSubs(!!initialPadSubs);
       setBatchMode(false);
     }
-  }, [isOpen, defaultOutputPath, dubDefaults, initialRenderSpeed]);
+  }, [isOpen, defaultOutputPath, dubDefaults, initialRenderSpeed, initialPadSubs]);
 
   const allItems = useMemo(() => {
     const seen = new Set<string>();

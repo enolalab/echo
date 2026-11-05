@@ -95,6 +95,8 @@ pub struct GeneralSettings {
     pub tts_voice: Option<String>,
     #[serde(default)]
     pub tts_model: Option<String>,
+    #[serde(default)]
+    pub tts_base_url: Option<String>,
     #[serde(default = "default_dub_orig_volume")]
     pub dub_orig_volume: f32,
     /// Render speed preset: "fast" | "balanced" | "quality" (hardsub only)
@@ -107,6 +109,10 @@ pub struct GeneralSettings {
     /// instead of making export a separate manual step.
     #[serde(default = "default_auto_export")]
     pub auto_export: bool,
+    /// Hardsub layout: place subtitles in a padded black bar below the
+    /// video instead of overlaying them on the picture.
+    #[serde(default)]
+    pub pad_subs: bool,
 }
 
 fn default_tts_engine() -> String {
@@ -147,10 +153,12 @@ impl Default for GeneralSettings {
             tts_engine: default_tts_engine(),
             tts_voice: None,
             tts_model: None,
+            tts_base_url: None,
             dub_orig_volume: default_dub_orig_volume(),
             render_speed: default_render_speed(),
             translate_concurrency: default_translate_concurrency(),
             auto_export: default_auto_export(),
+            pad_subs: false,
         }
     }
 }

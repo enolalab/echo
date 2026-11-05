@@ -528,16 +528,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 />
               </label>
               {general.tts_engine === 'api' && (
-                <label className="flex flex-col gap-1">
-                  <span>Model TTS</span>
-                  <input
-                    aria-label="Model TTS"
-                    value={general.tts_model ?? ''}
-                    placeholder="tts-1"
-                    onChange={(e) => patchGeneral({ tts_model: e.target.value.trim() || null })}
-                    className={inputCls}
-                  />
-                </label>
+                <>
+                  <label className="flex flex-col gap-1">
+                    <span>Địa chỉ máy chủ (Base URL)</span>
+                    <div className="flex gap-2">
+                      <input
+                        aria-label="Địa chỉ máy chủ TTS"
+                        value={general.tts_base_url ?? ''}
+                        placeholder="https://api.openai.com/v1"
+                        onChange={(e) => patchGeneral({ tts_base_url: e.target.value.trim() || null })}
+                        className={`flex-1 ${inputCls}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => patchGeneral({ tts_base_url: 'http://localhost:8000/v1' })}
+                        className="px-2 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 text-blue-300 rounded border border-slate-700 whitespace-nowrap transition"
+                        title="Điền nhanh địa chỉ Localhost (VieNeu-TTS / LocalAI)"
+                      >
+                        Localhost :8000
+                      </button>
+                    </div>
+                    <span className="text-[10px] text-slate-400">
+                      Để trống cho OpenAI cloud, hoặc nhập URL localhost (như http://localhost:8000/v1) để chạy mô hình offline (VieNeu-TTS, LocalAI...) không cần API key.
+                    </span>
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span>Model TTS</span>
+                    <input
+                      aria-label="Model TTS"
+                      value={general.tts_model ?? ''}
+                      placeholder="tts-1"
+                      onChange={(e) => patchGeneral({ tts_model: e.target.value.trim() || null })}
+                      className={inputCls}
+                    />
+                  </label>
+                </>
               )}
               <label className="flex flex-col gap-1">
                 <span>Âm lượng giọng gốc nền: {Math.round(general.dub_orig_volume * 100)}%</span>
